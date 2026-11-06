@@ -9,7 +9,7 @@
  * 插件不内置任何片源，源由用户自己添加或粘贴导入。
  */
 window.__ModuleLoader__.load({
-  id: '@local/dsh-cinema',
+  id: 'dsh-cinema',
   factory: (require) => {
     const React = require('react');
     const h = React.createElement;
