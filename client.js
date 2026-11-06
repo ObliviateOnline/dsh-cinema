@@ -125,8 +125,15 @@ window.__ModuleLoader__.load({
       key: '密钥',
       back: '返回对话',
       setupTitle: '先填一个 TMDB 密钥',
-      setupBody: '面板通过宿主的同源代理访问 TMDB，密钥只保存在这台浏览器里。v3 API Key 和 v4 Read Access Token 都支持。',
+      setupBody: '「电影 / 剧集 / 片库」用 TMDB 元数据，需要一份免费密钥；「片源」不需要，可以先用。',
       setupLink: '去 themoviedb.org 申请',
+      step1: '注册并登录 themoviedb.org（免费）',
+      step2: '头像 → Settings → API → Request an API key，选 Developer，用途填个人使用',
+      step3: '复制 API Key (v3) 或 Read Access Token (v4)，粘到下面点保存',
+      keyChecking: '正在校验…',
+      keyInvalid: '密钥无效（401）：确认复制的是 API Key 或 Read Access Token',
+      keyNetFail: '连不上 TMDB',
+      later: '先看片源，稍后设置',
       keyPlaceholder: '粘贴 API Key 或 Read Access Token',
       save: '保存',
       clear: '清除',
@@ -205,8 +212,15 @@ window.__ModuleLoader__.load({
       key: 'Key',
       back: 'Back to conversation',
       setupTitle: 'Add a TMDB key first',
-      setupBody: 'The panel reaches TMDB through the Host’s same-origin proxy; the key stays in this browser. A v3 API key or a v4 read access token both work.',
+      setupBody: 'Movies, shows and the library use TMDB metadata and need a free key; Sources work without it.',
       setupLink: 'Get one on themoviedb.org',
+      step1: 'Sign up and log in at themoviedb.org (free)',
+      step2: 'Avatar → Settings → API → Request an API key, choose Developer, personal use',
+      step3: 'Copy the API Key (v3) or Read Access Token (v4) and paste it below',
+      keyChecking: 'Checking…',
+      keyInvalid: 'Invalid key (401): make sure it is an API key or read access token',
+      keyNetFail: 'Could not reach TMDB',
+      later: 'Browse sources first',
       keyPlaceholder: 'Paste an API key or read access token',
       save: 'Save',
       clear: 'Clear',
@@ -1074,6 +1088,8 @@ window.__ModuleLoader__.load({
         const [history, setHistory] = React.useState(loadHistory);
         const [keyDraft, setKeyDraft] = React.useState('');
         const [keyEditorOpen, setKeyEditorOpen] = React.useState(false);
+        const [keyStatus, setKeyStatus] = React.useState(null);
+        const [keyError, setKeyError] = React.useState(null);
         const requestId = React.useRef(0);
 
         const [sources, setSources] = React.useState(loadSources);
@@ -1253,13 +1269,29 @@ window.__ModuleLoader__.load({
           return () => window.removeEventListener('keydown', onKeyDown);
         }, [detail, selectedVod, playing]);
 
-        const saveKey = () => {
+        const saveKey = async () => {
           const value = keyDraft.trim();
           if (value === '') return;
+          setKeyStatus('checking');
+          setKeyError(null);
+          try {
+            const res = await fetch('/dsh-cinema/tmdb/configuration', { headers: tmdbHeaders(value) });
+            if (!res.ok) {
+              const data = await res.json().catch(() => null);
+              setKeyStatus(res.status === 401 ? 'bad' : 'net');
+              setKeyError(data?.detail ? `${data.error ?? ''} ${data.detail}`.trim() : `HTTP ${res.status}`);
+              return;
+            }
+          } catch (err) {
+            setKeyStatus('net');
+            setKeyError(err.message);
+            return;
+          }
           writeStorage(KEY_STORAGE, value);
           setKey(value);
           setKeyDraft('');
           setKeyEditorOpen(false);
+          setKeyStatus('ok');
         };
 
         const clearKey = () => {
@@ -1620,6 +1652,23 @@ window.__ModuleLoader__.load({
           ),
         );
 
+        const keyStatusLine =
+          keyStatus === 'checking'
+            ? h('span', { style: styles.status }, t('keyChecking'))
+            : keyStatus === 'bad'
+              ? h(
+                  'span',
+                  { style: { ...styles.status, color: 'var(--dsw-alias-state-error-primary)' } },
+                  `${t('keyInvalid')}${keyError ? ` · ${keyError}` : ''}`,
+                )
+              : keyStatus === 'net'
+                ? h(
+                    'span',
+                    { style: { ...styles.status, color: 'var(--dsw-alias-state-error-primary)' } },
+                    `${t('keyNetFail')}${keyError ? ` · ${keyError}` : ''}`,
+                  )
+                : null;
+
         const setupView = h(
           'div',
           { style: styles.setup },
@@ -1628,6 +1677,21 @@ window.__ModuleLoader__.load({
             { style: styles.setupCard },
             h('h2', { style: styles.setupTitle }, t('setupTitle')),
             h('p', { style: styles.setupBody }, t('setupBody')),
+            h(
+              'ol',
+              {
+                style: {
+                  margin: 0,
+                  paddingLeft: '18px',
+                  fontSize: '12.5px',
+                  lineHeight: 1.8,
+                  color: 'var(--dsw-alias-label-secondary)',
+                },
+              },
+              h('li', null, t('step1')),
+              h('li', null, t('step2')),
+              h('li', null, t('step3')),
+            ),
             h('a', { href: TMDB_SIGNUP, target: '_blank', rel: 'noreferrer', style: styles.link }, t('setupLink')),
             h(
               'div',
@@ -1643,7 +1707,22 @@ window.__ModuleLoader__.load({
                 },
                 autoFocus: true,
               }),
-              h('button', { type: 'button', style: styles.primaryBtn(keyDraft.trim() === ''), onClick: saveKey }, t('save')),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  style: styles.primaryBtn(keyDraft.trim() === '' || keyStatus === 'checking'),
+                  onClick: saveKey,
+                  disabled: keyStatus === 'checking',
+                },
+                t('save'),
+              ),
+            ),
+            keyStatusLine,
+            h(
+              'div',
+              { style: { display: 'flex', justifyContent: 'flex-end' } },
+              h('button', { type: 'button', style: styles.ghostBtn, onClick: () => setTab('sources') }, t('later')),
             ),
           ),
         );
@@ -1693,17 +1772,31 @@ window.__ModuleLoader__.load({
               sceneLabel ? h('div', { style: styles.status }, t('sceneHint').replace('{label}', sceneLabel)) : null,
               keyEditorOpen
                 ? h(
-                    'div',
-                    { style: styles.keyRow },
-                    h('input', {
-                      type: 'password',
-                      style: styles.input,
-                      value: keyDraft,
-                      placeholder: t('keyPlaceholder'),
-                      onChange: (e) => setKeyDraft(e.target.value),
-                    }),
-                    h('button', { type: 'button', style: styles.primaryBtn(keyDraft.trim() === ''), onClick: saveKey }, t('save')),
-                    h('button', { type: 'button', style: styles.ghostBtn, onClick: clearKey }, t('clear')),
+                    React.Fragment,
+                    null,
+                    h(
+                      'div',
+                      { style: styles.keyRow },
+                      h('input', {
+                        type: 'password',
+                        style: styles.input,
+                        value: keyDraft,
+                        placeholder: t('keyPlaceholder'),
+                        onChange: (e) => setKeyDraft(e.target.value),
+                      }),
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          style: styles.primaryBtn(keyDraft.trim() === '' || keyStatus === 'checking'),
+                          onClick: saveKey,
+                          disabled: keyStatus === 'checking',
+                        },
+                        t('save'),
+                      ),
+                      h('button', { type: 'button', style: styles.ghostBtn, onClick: clearKey }, t('clear')),
+                    ),
+                    keyStatusLine,
                   )
                 : null,
               loading ? h('div', { style: styles.status }, t('loading')) : null,

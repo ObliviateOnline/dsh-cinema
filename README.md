@@ -85,10 +85,11 @@ plugin_manager  action=install_bundle  target=<插件目录绝对路径>
    `{"sources":[{"name":"…","url":"…"}]}` 粘进文本框 / 选文件导入
 3. 选一个源 → 搜索片名或翻页 → 点海报 → 选集 → 播放
 
-**TMDB**（可选，只影响「电影 / 剧集」两个标签）
+**TMDB**（可选，只影响「电影 / 剧集 / 片库」三个标签）
 
 1. 去 [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api) 申请免费 Developer Plan
-2. 把 **API Key (v3)** 或 **Read Access Token (v4)** 填进面板，存在浏览器 localStorage（键 `dsh-cinema:key`）
+2. 把 **API Key (v3)** 或 **Read Access Token (v4)** 填进面板，保存时会实时校验（401 直接提示密钥无效），存在浏览器 localStorage（键 `dsh-cinema:key`）
+3. 面板首次打开会显示分步引导；不想配也可以点「先看片源」直接看片
 
 ## 安全与边界
 
