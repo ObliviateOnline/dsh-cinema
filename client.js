@@ -19,8 +19,47 @@ window.__ModuleLoader__.load({
     const KEY_STORAGE = 'dsh-cinema:key';
     const HISTORY_STORAGE = 'dsh-cinema:history';
     const SOURCES_STORAGE = 'dsh-cinema:sources';
+    const PROGRESS_STORAGE = 'dsh-cinema:progress';
+    const FAVORITES_STORAGE = 'dsh-cinema:favorites';
     const HISTORY_MAX = 24;
     const TMDB_SIGNUP = 'https://www.themoviedb.org/settings/api';
+
+    const GENRES = {
+      movie: [
+        ['28', '动作'],
+        ['12', '冒险'],
+        ['16', '动画'],
+        ['35', '喜剧'],
+        ['80', '犯罪'],
+        ['99', '纪录'],
+        ['18', '剧情'],
+        ['10751', '家庭'],
+        ['14', '奇幻'],
+        ['36', '历史'],
+        ['27', '恐怖'],
+        ['10402', '音乐'],
+        ['9648', '悬疑'],
+        ['10749', '爱情'],
+        ['878', '科幻'],
+        ['53', '惊悚'],
+        ['10752', '战争'],
+        ['37', '西部'],
+      ],
+      tv: [
+        ['10759', '动作冒险'],
+        ['16', '动画'],
+        ['35', '喜剧'],
+        ['80', '犯罪'],
+        ['99', '纪录'],
+        ['18', '剧情'],
+        ['10751', '家庭'],
+        ['9648', '悬疑'],
+        ['10765', '科幻奇幻'],
+        ['10766', '肥皂剧'],
+        ['10764', '真人秀'],
+        ['10767', '脱口秀'],
+      ],
+    };
 
     const zh = {
       title: '影音工作室',
@@ -71,6 +110,26 @@ window.__ModuleLoader__.load({
       sourceNoMatch: '你的片源里没找到这部',
       sourceNone: '还没有片源，先去「片源」里添加或导入',
       pickSource: '选一个源播放',
+      tabHistory: '历史',
+      favorites: '收藏',
+      addFavorite: '收藏',
+      removeFavorite: '取消收藏',
+      noFavorites: '还没有收藏',
+      noHistory: '还没有播放记录',
+      resume: '继续',
+      playAgain: '重播',
+      removeRecord: '删除',
+      progressDone: '已看完',
+      speedTest: '测速',
+      speedTesting: '测速中…',
+      speedDead: '不通',
+      searchCloudClear: '清空记录',
+      quickSearch: '搜过',
+      tabLibrary: '片库',
+      genre: '类型',
+      year: '年份',
+      all: '全部',
+      libraryEnd: '已经到底了',
       needHls: 'HLS 播放器没加载成功，只能播 mp4 直链。',
       playerError: '播放失败',
       remove: '删除',
@@ -129,6 +188,26 @@ window.__ModuleLoader__.load({
       sourceNoMatch: 'Not found in your sources',
       sourceNone: 'No sources yet — add or import them in the Sources tab',
       pickSource: 'Pick a source to play',
+      tabHistory: 'History',
+      favorites: 'Favorites',
+      addFavorite: 'Favorite',
+      removeFavorite: 'Unfavorite',
+      noFavorites: 'No favorites yet',
+      noHistory: 'Nothing watched yet',
+      resume: 'Resume',
+      playAgain: 'Play again',
+      removeRecord: 'Remove',
+      progressDone: 'Finished',
+      speedTest: 'Test',
+      speedTesting: 'Testing…',
+      speedDead: 'Down',
+      searchCloudClear: 'Clear history',
+      quickSearch: 'Recent searches',
+      tabLibrary: 'Library',
+      genre: 'Genre',
+      year: 'Year',
+      all: 'All',
+      libraryEnd: 'End of list',
       needHls: 'The HLS player did not load; only direct mp4 links can play.',
       playerError: 'Playback failed',
       remove: 'Remove',
@@ -180,6 +259,26 @@ window.__ModuleLoader__.load({
             name: String(s.name ?? s.url).trim() || s.url,
             url: s.url,
           }));
+      } catch {
+        return [];
+      }
+    }
+
+    function loadProgress() {
+      try {
+        const parsed = JSON.parse(readStorage(PROGRESS_STORAGE) ?? '[]');
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter((x) => x && typeof x.url === 'string' && /^https?:\/\//i.test(x.url));
+      } catch {
+        return [];
+      }
+    }
+
+    function loadFavorites() {
+      try {
+        const parsed = JSON.parse(readStorage(FAVORITES_STORAGE) ?? '[]');
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter((x) => x && (x.kind === 'tmdb' || x.kind === 'vod'));
       } catch {
         return [];
       }
@@ -251,6 +350,55 @@ window.__ModuleLoader__.load({
     }
 
     /* ------------------------------------------------------------ CMS */
+
+    /** 解析片源文本：JSON 数组 / {sources} / TVBox {sites} / `名称|地址` 分行 / 裸地址。 */
+    function parseSourcesText(text) {
+      const out = [];
+      const push = (name, url) => {
+        const clean = String(url ?? '').trim();
+        if (!/^https?:\/\//i.test(clean)) return;
+        out.push({ name: String(name ?? '').trim() || clean, url: clean });
+      };
+      const raw = String(text ?? '').trim();
+      if (raw === '') return out;
+
+      if (raw.startsWith('{') || raw.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(raw);
+          const list = Array.isArray(parsed)
+            ? parsed
+            : Array.isArray(parsed?.sources)
+              ? parsed.sources
+              : Array.isArray(parsed?.sites)
+                ? parsed.sites
+                : [];
+          for (const item of list) {
+            if (typeof item === 'string') {
+              const [name, url] = item.split('|');
+              push(name, url);
+            } else if (item && typeof item === 'object') {
+              push(item.name ?? item.Name, item.url ?? item.api ?? item.Api ?? item.Url);
+            }
+          }
+          if (out.length > 0) return out;
+        } catch {
+          /* 不是合法 JSON，按分行格式继续 */
+        }
+      }
+
+      for (const line of raw.split(/\r?\n/)) {
+        const value = line.trim();
+        if (value === '' || value.startsWith('#')) continue;
+        if (value.startsWith('{') || value.startsWith('[')) continue;
+        if (value.includes('|')) {
+          const at = value.indexOf('|');
+          push(value.slice(0, at), value.slice(at + 1));
+          continue;
+        }
+        if (/^https?:\/\//i.test(value)) push('', value);
+      }
+      return out;
+    }
 
     function cmsEndpoint(base, params) {
       let url;
@@ -615,6 +763,15 @@ window.__ModuleLoader__.load({
         flex: '0 0 auto',
         width: '54px',
       },
+      histRow: {
+        display: 'flex',
+        gap: '10px',
+        alignItems: 'center',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        background: 'var(--dsw-alias-bg-layer-1)',
+        borderRadius: '10px',
+        padding: '8px 10px',
+      },
       modalBackdrop: {
         position: 'absolute',
         inset: 0,
@@ -695,7 +852,7 @@ window.__ModuleLoader__.load({
       });
     }
 
-    function Player({ src, title, onClose, t }) {
+    function Player({ src, title, initialPosition, onProgress, onEnded, onClose, t }) {
       const videoRef = React.useRef(null);
       const [error, setError] = React.useState(null);
 
@@ -736,6 +893,36 @@ window.__ModuleLoader__.load({
           video.load();
         };
       }, [src]);
+
+      React.useEffect(() => {
+        const video = videoRef.current;
+        if (!video) return undefined;
+        const seek = () => {
+          if (!initialPosition || initialPosition < 5) return;
+          const max = Number.isFinite(video.duration) && video.duration > 5 ? video.duration - 5 : initialPosition;
+          video.currentTime = Math.min(initialPosition, max);
+        };
+        if (video.readyState >= 1) seek();
+        let lastAt = 0;
+        const onTime = () => {
+          const now = Date.now();
+          if (now - lastAt < 5000) return;
+          lastAt = now;
+          if (onProgress && Number.isFinite(video.duration) && video.duration > 0) onProgress(video.currentTime, video.duration);
+        };
+        const handleEnded = () => {
+          if (onProgress && Number.isFinite(video.duration)) onProgress(video.duration, video.duration);
+          if (onEnded) onEnded();
+        };
+        video.addEventListener('loadedmetadata', seek);
+        video.addEventListener('timeupdate', onTime);
+        video.addEventListener('ended', handleEnded);
+        return () => {
+          video.removeEventListener('loadedmetadata', seek);
+          video.removeEventListener('timeupdate', onTime);
+          video.removeEventListener('ended', handleEnded);
+        };
+      }, [src, initialPosition]);
 
       return h(
         'div',
@@ -795,12 +982,82 @@ window.__ModuleLoader__.load({
         const [selectedVod, setSelectedVod] = React.useState(null);
         const [activeLine, setActiveLine] = React.useState(0);
         const [playing, setPlaying] = React.useState(null);
+        const [speed, setSpeed] = React.useState({});
+        const [testing, setTesting] = React.useState(false);
+        const [searches, setSearches] = React.useState(() => {
+          try {
+            const parsed = JSON.parse(readStorage('dsh-cinema:searches') ?? '[]');
+            return Array.isArray(parsed) ? parsed.filter((x) => x && typeof x.q === 'string') : [];
+          } catch {
+            return [];
+          }
+        });
+        const [progress, setProgress] = React.useState(loadProgress);
+        const [favorites, setFavorites] = React.useState(loadFavorites);
+        const [favoritesOpen, setFavoritesOpen] = React.useState(false);
+        const [libType, setLibType] = React.useState('movie');
+        const [libGenre, setLibGenre] = React.useState('');
+        const [libYear, setLibYear] = React.useState('');
+        const [libItems, setLibItems] = React.useState([]);
+        const [libPage, setLibPage] = React.useState(1);
+        const [libLoading, setLibLoading] = React.useState(false);
+        const [libError, setLibError] = React.useState(null);
+        const [libHasMore, setLibHasMore] = React.useState(true);
+
+        const years = React.useMemo(() => {
+          const current = new Date().getFullYear();
+          return Array.from({ length: 37 }, (_, index) => String(current - index));
+        }, []);
+
+        React.useEffect(() => {
+          if (tab !== 'library' || !key) return undefined;
+          let cancelled = false;
+          setLibLoading(true);
+          setLibError(null);
+          const params = new URLSearchParams({
+            language: 'zh-CN',
+            sort_by: 'popularity.desc',
+            include_adult: 'false',
+            page: String(libPage),
+          });
+          if (libGenre) params.set('with_genres', libGenre);
+          if (libYear) params.set(libType === 'movie' ? 'primary_release_year' : 'first_air_date_year', libYear);
+          tmdbGet(`/discover/${libType}?${params.toString()}`, key)
+            .then((json) => {
+              if (cancelled) return;
+              const list = normalize(json?.results, libType);
+              setLibItems((prev) => (libPage === 1 ? list : [...prev, ...list]));
+              setLibHasMore(Number(json?.total_pages ?? 1) > libPage);
+            })
+            .catch((err) => {
+              if (cancelled) return;
+              setLibError(err.message);
+            })
+            .finally(() => {
+              if (!cancelled) setLibLoading(false);
+            });
+          return () => {
+            cancelled = true;
+          };
+        }, [tab, key, libType, libGenre, libYear, libPage]);
 
         const activeSource = sources.find((s) => s.id === activeSourceId) ?? null;
 
         React.useEffect(() => {
           writeStorage(SOURCES_STORAGE, JSON.stringify(sources));
         }, [sources]);
+
+        React.useEffect(() => {
+          writeStorage(PROGRESS_STORAGE, JSON.stringify(progress));
+        }, [progress]);
+
+        React.useEffect(() => {
+          writeStorage(FAVORITES_STORAGE, JSON.stringify(favorites));
+        }, [favorites]);
+
+        React.useEffect(() => {
+          writeStorage('dsh-cinema:searches', JSON.stringify(searches));
+        }, [searches]);
 
         React.useEffect(() => {
           if (sources.length === 0) {
@@ -888,14 +1145,20 @@ window.__ModuleLoader__.load({
           setKeyEditorOpen(false);
         };
 
-        const runSearch = (event) => {
-          event.preventDefault();
-          const term = query.trim();
-          if (!key) return;
-          if (term === '') {
-            setNonce((n) => n + 1);
-            return;
-          }
+        const rememberSearch = (term) => {
+          const q = String(term ?? '').trim();
+          if (q === '') return;
+          setSearches((prev) => {
+            const hit = prev.find((x) => x.q === q);
+            const next = hit
+              ? prev.map((x) => (x.q === q ? { ...x, n: (x.n ?? 1) + 1 } : x))
+              : [{ q, n: 1 }, ...prev];
+            return next.sort((a, b) => (b.n ?? 1) - (a.n ?? 1)).slice(0, 30);
+          });
+        };
+
+        const searchTmdb = (term) => {
+          if (!key || !term) return;
           const id = requestId.current + 1;
           requestId.current = id;
           setLoading(true);
@@ -913,6 +1176,17 @@ window.__ModuleLoader__.load({
             .finally(() => {
               if (requestId.current === id) setLoading(false);
             });
+        };
+
+        const runSearch = (event) => {
+          event.preventDefault();
+          const term = query.trim();
+          if (term === '') {
+            setNonce((n) => n + 1);
+            return;
+          }
+          rememberSearch(term);
+          searchTmdb(term);
         };
 
         const openDetail = (item) => {
@@ -977,30 +1251,60 @@ window.__ModuleLoader__.load({
           setSources((prev) => prev.filter((s) => s.id !== id));
         };
 
-        const importSources = () => {
-          try {
-            const parsed = JSON.parse(importText);
-            const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.sources) ? parsed.sources : [];
-            const incoming = list
-              .filter((x) => x && typeof x.url === 'string' && /^https?:\/\//i.test(x.url))
-              .map((x, index) => ({
-                id: `imp-${Date.now()}-${index}`,
-                name: String(x.name ?? x.url).trim() || x.url,
-                url: x.url,
-              }));
-            if (incoming.length === 0) {
-              setCmsError('JSON 里没有可用的 url');
+        const importSources = async () => {
+          const text = importText.trim();
+          if (text === '') return;
+          setCmsError(null);
+          let raw = text;
+          if (/^https?:\/\/\S+$/i.test(text)) {
+            try {
+              const res = await fetch(`/dsh-cinema/cms?u=${encodeURIComponent(text)}`);
+              raw = await res.text();
+            } catch (err) {
+              setCmsError(`配置地址拉取失败：${err.message}`);
               return;
             }
-            setSources((prev) => {
-              const seen = new Set(prev.map((s) => s.url));
-              return [...prev, ...incoming.filter((x) => !seen.has(x.url))];
-            });
-            setImportText('');
-            setCmsError(null);
-          } catch {
-            setCmsError('JSON 解析失败，检查一下格式');
           }
+          const incoming = parseSourcesText(raw).map((item, index) => ({
+            id: `imp-${Date.now()}-${index}`,
+            name: item.name,
+            url: item.url,
+          }));
+          if (incoming.length === 0) {
+            setCmsError('没解析出可用的接口地址（支持 JSON、TVBox 配置、名称|地址、配置地址）');
+            return;
+          }
+          setSources((prev) => {
+            const seen = new Set(prev.map((s) => s.url));
+            return [...prev, ...incoming.filter((x) => !seen.has(x.url))];
+          });
+          setImportText('');
+        };
+
+        const testSources = async () => {
+          if (sources.length === 0 || testing) return;
+          setTesting(true);
+          const results = {};
+          await Promise.all(
+            sources.map(async (source) => {
+              const started = Date.now();
+              const controller = new AbortController();
+              const timer = window.setTimeout(() => controller.abort(), 6000);
+              try {
+                const target = cmsEndpoint(source.url, { ac: 'detail', pg: '1' });
+                const res = await fetch(`/dsh-cinema/cms?u=${encodeURIComponent(target)}`, { signal: controller.signal });
+                const json = await res.json().catch(() => null);
+                const list = normalizeCms(json);
+                results[source.id] = list.length > 0 ? { ok: true, ms: Date.now() - started } : { ok: false, ms: 0 };
+              } catch (err) {
+                results[source.id] = { ok: false, ms: 0, error: err.name === 'AbortError' ? '超时' : err.message };
+              } finally {
+                window.clearTimeout(timer);
+              }
+            }),
+          );
+          setSpeed(results);
+          setTesting(false);
         };
 
         const runCmsSearch = (event) => {
@@ -1009,9 +1313,15 @@ window.__ModuleLoader__.load({
           const term = cmsQuery.trim();
           if (term === '') {
             setCmsSearching(false);
-            setCmsPage((p) => (p === 1 ? 1 : 1));
+            setCmsPage(1);
             return;
           }
+          rememberSearch(term);
+          searchCms(term);
+        };
+
+        const searchCms = (term) => {
+          if (!activeSource || !term) return;
           setCmsSearching(true);
           setCmsLoading(true);
           setCmsError(null);
@@ -1030,11 +1340,68 @@ window.__ModuleLoader__.load({
           setSelectedVod({ item, lines });
         };
 
-        const playEpisode = (episode) => {
+        const playEpisode = (episode, index) => {
           if (!selectedVod) return;
-          setPlaying({ url: episode.url, title: `${selectedVod.item.title} · ${episode.name}` });
+          const line = selectedVod.lines[activeLine];
+          const episodes = (line?.episodes ?? []).map((ep) => ({ name: ep.name, url: ep.url }));
+          setPlaying({
+            url: episode.url,
+            title: `${selectedVod.item.title} · ${episode.name}`,
+            position: 0,
+            episodes,
+            index: typeof index === 'number' ? index : episodes.findIndex((ep) => ep.url === episode.url),
+            vodTitle: selectedVod.item.title,
+            pic: selectedVod.item.pic,
+            raw: selectedVod.item.raw,
+            lineName: line?.name ?? '',
+            episodeName: episode.name,
+          });
           setSelectedVod(null);
         };
+
+        const recordProgress = (position, duration) => {
+          if (!playing) return;
+          const entry = {
+            key: playing.url,
+            title: playing.vodTitle ?? playing.title,
+            pic: playing.pic ?? '',
+            url: playing.url,
+            episode: playing.episodeName ?? '',
+            line: playing.lineName ?? '',
+            raw: playing.raw ?? null,
+            position: Math.max(0, Math.round(position || 0)),
+            duration: Math.max(0, Math.round(duration || 0)),
+            updatedAt: Date.now(),
+          };
+          setProgress((prev) => [entry, ...prev.filter((x) => x.key !== entry.key)].slice(0, 40));
+        };
+
+        const playNext = () => {
+          setPlaying((prev) => {
+            if (!prev || !Array.isArray(prev.episodes) || prev.episodes.length === 0) return prev;
+            const nextIndex = (prev.index ?? -1) + 1;
+            if (nextIndex >= prev.episodes.length) return prev;
+            const next = prev.episodes[nextIndex];
+            return {
+              ...prev,
+              url: next.url,
+              title: `${prev.vodTitle} · ${next.name}`,
+              position: 0,
+              index: nextIndex,
+              episodeName: next.name,
+            };
+          });
+        };
+
+        const toggleFavorite = (entry) => {
+          setFavorites((prev) =>
+            prev.some((f) => f.kind === entry.kind && String(f.id) === String(entry.id))
+              ? prev.filter((f) => !(f.kind === entry.kind && String(f.id) === String(entry.id)))
+              : [entry, ...prev].slice(0, 100),
+          );
+        };
+
+        const isFavorite = (kind, id) => favorites.some((f) => f.kind === kind && String(f.id) === String(id));
 
         const close = () => {
           try {
@@ -1044,12 +1411,35 @@ window.__ModuleLoader__.load({
           }
         };
 
+        const cloud = (onPick) =>
+          searches.length === 0
+            ? null
+            : h(
+                'div',
+                { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', flex: '0 0 auto' } },
+                h('span', { style: styles.status }, t('quickSearch')),
+                searches.map((item) =>
+                  h(
+                    'button',
+                    {
+                      key: item.q,
+                      type: 'button',
+                      style: { ...styles.chip(false), fontSize: `${Math.min(15, 11 + (item.n ?? 1))}px` },
+                      onClick: () => onPick(item.q),
+                      title: `${item.n ?? 1}×`,
+                    },
+                    item.q,
+                  ),
+                ),
+                h('button', { type: 'button', style: styles.ghostBtn, onClick: () => setSearches([]) }, t('searchCloudClear')),
+              );
+
         /* ------------------------------------------------------ render */
 
         const tabs = h(
           'div',
           { style: styles.toolbar },
-          ['movie', 'tv', 'sources'].map((id) =>
+          ['movie', 'tv', 'library', 'sources', 'history'].map((id) =>
             h(
               'button',
               {
@@ -1061,7 +1451,15 @@ window.__ModuleLoader__.load({
                   setQuery('');
                 },
               },
-              id === 'movie' ? t('tabMovies') : id === 'tv' ? t('tabTv') : t('tabSources'),
+              id === 'movie'
+                ? t('tabMovies')
+                : id === 'tv'
+                  ? t('tabTv')
+                  : id === 'library'
+                    ? t('tabLibrary')
+                    : id === 'sources'
+                      ? t('tabSources')
+                      : t('tabHistory'),
             ),
           ),
         );
@@ -1129,6 +1527,13 @@ window.__ModuleLoader__.load({
                 ),
                 h('button', { type: 'button', style: styles.ghostBtn, onClick: () => setNonce((n) => n + 1) }, t('refresh')),
               ),
+              query.trim() === ''
+                ? cloud((term) => {
+                    setQuery(term);
+                    rememberSearch(term);
+                    searchTmdb(term);
+                  })
+                : null,
               keyEditorOpen
                 ? h(
                     'div',
@@ -1204,31 +1609,48 @@ window.__ModuleLoader__.load({
           'div',
           { style: styles.setupCard },
           h('h2', { style: styles.setupTitle }, t('manageSources')),
-          h(
-            'div',
-            { style: styles.chipsRow },
-            sources.map((s) =>
-              h(
-                'span',
-                { key: s.id, style: { display: 'inline-flex', alignItems: 'center', gap: '6px' } },
                 h(
-                  'button',
-                  { type: 'button', style: styles.chip(s.id === activeSourceId), onClick: () => setActiveSourceId(s.id) },
-                  s.name,
+                  'div',
+                  { style: styles.chipsRow },
+                  sources.map((s) =>
+                    h(
+                      'span',
+                      { key: s.id, style: { display: 'inline-flex', alignItems: 'center', gap: '6px' } },
+                      h(
+                        'button',
+                        { type: 'button', style: styles.chip(s.id === activeSourceId), onClick: () => setActiveSourceId(s.id) },
+                        s.name,
+                      ),
+                      speed[s.id]
+                        ? h(
+                            'span',
+                            {
+                              style: {
+                                fontSize: '11px',
+                                color: speed[s.id].ok ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)',
+                              },
+                            },
+                            speed[s.id].ok ? `${speed[s.id].ms}ms` : t('speedDead'),
+                          )
+                        : null,
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          style: { ...styles.ghostBtn, padding: '2px 6px' },
+                          onClick: () => removeSource(s.id),
+                          title: t('remove'),
+                        },
+                        '×',
+                      ),
+                    ),
+                  ),
                 ),
                 h(
-                  'button',
-                  {
-                    type: 'button',
-                    style: { ...styles.ghostBtn, padding: '2px 6px' },
-                    onClick: () => removeSource(s.id),
-                    title: t('remove'),
-                  },
-                  '×',
+                  'div',
+                  { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' } },
+                  h('button', { type: 'button', style: styles.ghostBtn, onClick: testSources, disabled: testing }, testing ? t('speedTesting') : t('speedTest')),
                 ),
-              ),
-            ),
-          ),
           h(
             'div',
             { style: styles.keyRow },
@@ -1306,6 +1728,13 @@ window.__ModuleLoader__.load({
                   ),
                   h('button', { type: 'button', style: styles.ghostBtn, onClick: () => setSourceManagerOpen((v) => !v) }, t('manageSources')),
                 ),
+                cmsQuery.trim() === ''
+                  ? cloud((term) => {
+                      setCmsQuery(term);
+                      rememberSearch(term);
+                      searchCms(term);
+                    })
+                  : null,
                 sourceManagerOpen ? sourceManager : null,
                 h(
                   'div',
@@ -1412,7 +1841,29 @@ window.__ModuleLoader__.load({
                     'div',
                     { style: { display: 'flex', justifyContent: 'space-between', gap: '10px' } },
                     h('h2', { style: styles.modalTitle }, selectedVod.item.title),
-                    h('button', { type: 'button', style: styles.ghostBtn, onClick: () => setSelectedVod(null) }, t('close')),
+                    h(
+                      'div',
+                      { style: { display: 'flex', gap: '6px' } },
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          style: styles.ghostBtn,
+                          onClick: () =>
+                            toggleFavorite({
+                              kind: 'vod',
+                              id: selectedVod.item.id,
+                              title: selectedVod.item.title,
+                              pic: selectedVod.item.pic,
+                              year: selectedVod.item.year,
+                              remarks: selectedVod.item.remarks,
+                              raw: selectedVod.item.raw,
+                            }),
+                        },
+                        isFavorite('vod', selectedVod.item.id) ? t('removeFavorite') : t('addFavorite'),
+                      ),
+                      h('button', { type: 'button', style: styles.ghostBtn, onClick: () => setSelectedVod(null) }, t('close')),
+                    ),
                   ),
                   h(
                     'div',
@@ -1448,13 +1899,281 @@ window.__ModuleLoader__.load({
                           type: 'button',
                           style: styles.epBtn,
                           title: episode.url,
-                          onClick: () => playEpisode(episode),
+                          onClick: () => playEpisode(episode, index),
                         },
                         episode.name || String(index + 1),
                       ),
                     ),
                   ),
                 ),
+              ),
+            )
+          : null;
+
+        const libraryBody = !key
+          ? setupView
+          : h(
+              React.Fragment,
+              null,
+              h(
+                'div',
+                { style: styles.toolbar },
+                ['movie', 'tv'].map((type) =>
+                  h(
+                    'button',
+                    {
+                      key: type,
+                      type: 'button',
+                      style: styles.tab(libType === type),
+                      onClick: () => {
+                        setLibType(type);
+                        setLibGenre('');
+                        setLibPage(1);
+                        setLibItems([]);
+                        setLibHasMore(true);
+                      },
+                    },
+                    type === 'movie' ? t('tabMovies') : t('tabTv'),
+                  ),
+                ),
+                h(
+                  'select',
+                  {
+                    style: { ...styles.input, flex: '0 0 140px' },
+                    value: libGenre,
+                    onChange: (event) => {
+                      setLibGenre(event.target.value);
+                      setLibPage(1);
+                      setLibItems([]);
+                      setLibHasMore(true);
+                    },
+                  },
+                  h('option', { value: '' }, `${t('genre')} · ${t('all')}`),
+                  ...(GENRES[libType] ?? []).map(([id, name]) => h('option', { key: id, value: id }, name)),
+                ),
+                h(
+                  'select',
+                  {
+                    style: { ...styles.input, flex: '0 0 120px' },
+                    value: libYear,
+                    onChange: (event) => {
+                      setLibYear(event.target.value);
+                      setLibPage(1);
+                      setLibItems([]);
+                      setLibHasMore(true);
+                    },
+                  },
+                  h('option', { value: '' }, `${t('year')} · ${t('all')}`),
+                  ...years.map((year) => h('option', { key: year, value: year }, year)),
+                ),
+              ),
+              libLoading && libItems.length === 0 ? h('div', { style: styles.status }, t('loading')) : null,
+              libError
+                ? h('div', { style: styles.errorBox }, h('strong', null, t('proxyError')), h('span', null, libError))
+                : null,
+              !libLoading && !libError && libItems.length === 0 ? h('div', { style: styles.status }, t('empty')) : null,
+              h(
+                'div',
+                {
+                  style: styles.grid,
+                  onScroll: (event) => {
+                    const el = event.currentTarget;
+                    if (!libLoading && libHasMore && el.scrollTop + el.clientHeight >= el.scrollHeight - 240) {
+                      setLibPage((page) => page + 1);
+                    }
+                  },
+                },
+                libItems.map((item) =>
+                  gridCard(
+                    `${item.mediaType}-${item.id}`,
+                    item.poster ? posterUrl(item.poster, 'w342') : null,
+                    item.rating !== null ? h('span', { style: styles.ratingBadge }, `★ ${item.rating.toFixed(1)}`) : null,
+                    item.title,
+                    item.year,
+                    () => openDetail(item),
+                  ),
+                ),
+              ),
+              libLoading && libItems.length > 0 ? h('div', { style: styles.status }, t('loading')) : null,
+            );
+
+        const historyBody =
+          progress.length === 0
+            ? h('div', { style: styles.status }, t('noHistory'))
+            : h(
+                'div',
+                {
+                  style: {
+                    flex: '1 1 auto',
+                    minHeight: 0,
+                    overflowY: 'auto',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                    paddingRight: '2px',
+                  },
+                },
+                progress.map((entry) => {
+                  const pct = entry.duration > 0 ? Math.min(100, Math.round((entry.position / entry.duration) * 100)) : 0;
+                  const meta = [entry.episode, entry.line, pct >= 95 ? t('progressDone') : `${pct}%`].filter(Boolean).join(' · ');
+                  return h(
+                    'div',
+                    { key: entry.key, style: styles.histRow },
+                    h(
+                      'div',
+                      { style: { width: '46px', flex: '0 0 auto' } },
+                      h(Poster, {
+                        src: entry.pic ? picUrl(entry.pic) : null,
+                        alt: entry.title,
+                        fallbackText: '',
+                        style: { width: '100%', height: 'auto', aspectRatio: '2 / 3', borderRadius: '6px' },
+                      }),
+                    ),
+                    h(
+                      'div',
+                      { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px' } },
+                      h(
+                        'span',
+                        { style: { fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                        entry.title,
+                      ),
+                      h('span', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' } }, meta),
+                      h(
+                        'div',
+                        { style: { height: '3px', borderRadius: '2px', background: 'var(--dsw-alias-bg-layer-2)', overflow: 'hidden' } },
+                        h('div', { style: { width: `${pct}%`, height: '100%', background: 'var(--dsw-alias-brand-primary)' } }),
+                      ),
+                    ),
+                    h(
+                      'div',
+                      { style: { display: 'flex', gap: '6px', flex: '0 0 auto' } },
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          style: styles.primaryBtn(false),
+                          onClick: () =>
+                            setPlaying({
+                              url: entry.url,
+                              title: entry.title,
+                              position: entry.position,
+                              vodTitle: entry.title,
+                              pic: entry.pic,
+                              raw: entry.raw,
+                              lineName: entry.line,
+                              episodeName: entry.episode,
+                              episodes: null,
+                              index: 0,
+                            }),
+                        },
+                        entry.position > 0 ? t('resume') : t('playAgain'),
+                      ),
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          style: styles.ghostBtn,
+                          onClick: () => setProgress((prev) => prev.filter((x) => x.key !== entry.key)),
+                        },
+                        t('removeRecord'),
+                      ),
+                    ),
+                  );
+                }),
+              );
+
+        const favoritesModal = favoritesOpen
+          ? h(
+              'div',
+              {
+                style: styles.modalBackdrop,
+                onClick: (event) => {
+                  if (event.target === event.currentTarget) setFavoritesOpen(false);
+                },
+              },
+              h(
+                'div',
+                { style: { ...styles.modal, display: 'block' } },
+                h(
+                  'div',
+                  { style: { display: 'flex', justifyContent: 'space-between', marginBottom: '10px' } },
+                  h('h2', { style: styles.modalTitle }, t('favorites')),
+                  h('button', { type: 'button', style: styles.ghostBtn, onClick: () => setFavoritesOpen(false) }, t('close')),
+                ),
+                favorites.length === 0
+                  ? h('p', { style: styles.status }, t('noFavorites'))
+                  : h(
+                      'div',
+                      { style: { display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '440px', overflowY: 'auto' } },
+                      favorites.map((fav) =>
+                        h(
+                          'div',
+                          { key: `${fav.kind}-${fav.id}`, style: styles.histRow },
+                          h(Poster, {
+                            src: fav.pic ? picUrl(fav.pic) : fav.poster ? posterUrl(fav.poster, 'w154') : null,
+                            alt: fav.title,
+                            fallbackText: '',
+                            style: { width: '40px', height: '60px', objectFit: 'cover', borderRadius: '5px' },
+                          }),
+                          h(
+                            'span',
+                            {
+                              style: {
+                                flex: '1 1 auto',
+                                fontSize: '13px',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              },
+                            },
+                            fav.title,
+                          ),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              style: styles.ghostBtn,
+                              onClick: () => {
+                                setFavoritesOpen(false);
+                                if (fav.kind === 'tmdb') {
+                                  openDetail({
+                                    id: fav.id,
+                                    mediaType: fav.mediaType,
+                                    title: fav.title,
+                                    year: fav.year,
+                                    poster: fav.poster,
+                                    rating: null,
+                                    overview: '',
+                                  });
+                                } else {
+                                  openVod({
+                                    id: String(fav.id),
+                                    title: fav.title,
+                                    pic: fav.pic,
+                                    year: fav.year,
+                                    remarks: fav.remarks,
+                                    raw: fav.raw,
+                                  });
+                                }
+                              },
+                            },
+                            t('playAgain'),
+                          ),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              style: styles.ghostBtn,
+                              onClick: () =>
+                                setFavorites((prev) =>
+                                  prev.filter((f) => !(f.kind === fav.kind && String(f.id) === String(fav.id))),
+                                ),
+                            },
+                            '×',
+                          ),
+                        ),
+                      ),
+                    ),
               ),
             )
           : null;
@@ -1495,7 +2214,28 @@ window.__ModuleLoader__.load({
                     'div',
                     { style: { display: 'flex', justifyContent: 'space-between', gap: '10px' } },
                     h('h2', { style: styles.modalTitle }, detail.data?.title ?? detail.data?.name ?? detail.item?.title ?? '—'),
-                    h('button', { type: 'button', style: styles.ghostBtn, onClick: () => setDetail(null) }, t('close')),
+                    h(
+                      'div',
+                      { style: { display: 'flex', gap: '6px' } },
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          style: styles.ghostBtn,
+                          onClick: () =>
+                            toggleFavorite({
+                              kind: 'tmdb',
+                              id: detail.item.id,
+                              mediaType: detail.item.mediaType,
+                              title: detail.data?.title ?? detail.data?.name ?? detail.item?.title ?? '',
+                              poster: detail.data?.poster_path ?? detail.item?.poster ?? null,
+                              year: detail.item?.year ?? '',
+                            }),
+                        },
+                        isFavorite('tmdb', detail.item.id) ? t('removeFavorite') : t('addFavorite'),
+                      ),
+                      h('button', { type: 'button', style: styles.ghostBtn, onClick: () => setDetail(null) }, t('close')),
+                    ),
                   ),
                   h(
                     'div',
@@ -1589,14 +2329,30 @@ window.__ModuleLoader__.load({
                     t('key'),
                   )
                 : null,
+              h(
+                'button',
+                { type: 'button', style: styles.ghostBtn, onClick: () => setFavoritesOpen(true) },
+                `${t('favorites')}${favorites.length > 0 ? ` ${favorites.length}` : ''}`,
+              ),
               h('button', { type: 'button', style: styles.ghostBtn, onClick: close }, t('back')),
             ),
           ),
           tabs,
-          tab === 'sources' ? sourcesBody : tmdbBody,
+          tab === 'sources' ? sourcesBody : tab === 'library' ? libraryBody : tab === 'history' ? historyBody : tmdbBody,
           tmdbModal,
           vodModal,
-          playing ? h(Player, { src: playing.url, title: playing.title, onClose: () => setPlaying(null), t }) : null,
+          favoritesModal,
+          playing
+            ? h(Player, {
+                src: playing.url,
+                title: playing.title,
+                initialPosition: playing.position ?? 0,
+                onProgress: recordProgress,
+                onEnded: playNext,
+                onClose: () => setPlaying(null),
+                t,
+              })
+            : null,
         );
       };
     }
