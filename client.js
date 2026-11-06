@@ -61,6 +61,21 @@ window.__ModuleLoader__.load({
       ],
     };
 
+    /** 场景/心情词 → TMDB 类型（自然语言搜索的兜底扩展）。 */
+    const SCENE_RULES = [
+      { words: ['回南天', '梅雨', '下雨', '雨天', '潮湿'], genres: ['10749', '18'], label: '雨天/潮湿' },
+      { words: ['夜宵', '宵夜', '深夜', '睡不着'], genres: ['35', '80'], label: '深夜/夜宵' },
+      { words: ['聚会', '派对', '朋友', '多人'], genres: ['35', '12'], label: '聚会' },
+      { words: ['心情不好', 'emo', '低落', '治愈', '难过'], genres: ['18', '10749'], label: '治愈' },
+      { words: ['陪爸妈', '家庭', '家务', '背景音', '吃饭'], genres: ['10751', '35'], label: '家庭/背景音' },
+      { words: ['恐怖', '吓人', '惊悚'], genres: ['27', '53'], label: '恐怖' },
+      { words: ['科幻', '太空', '未来'], genres: ['878', '12'], label: '科幻' },
+      { words: ['动画', '动漫', '二次元'], genres: ['16'], label: '动画' },
+      { words: ['爱情', '恋爱', '甜'], genres: ['10749'], label: '爱情' },
+      { words: ['动作', '打斗', '热血'], genres: ['28', '12'], label: '动作' },
+      { words: ['悬疑', '烧脑', '推理'], genres: ['9648', '53'], label: '悬疑' },
+    ];
+
     const zh = {
       title: '影音工作室',
       subtitle: '热门电影、剧集，以及你自己的片源',
@@ -125,6 +140,7 @@ window.__ModuleLoader__.load({
       speedDead: '不通',
       searchCloudClear: '清空记录',
       quickSearch: '搜过',
+      sceneHint: '已按场景扩展：{label}',
       tabLibrary: '片库',
       genre: '类型',
       year: '年份',
@@ -203,6 +219,7 @@ window.__ModuleLoader__.load({
       speedDead: 'Down',
       searchCloudClear: 'Clear history',
       quickSearch: 'Recent searches',
+      sceneHint: 'Scene match: {label}',
       tabLibrary: 'Library',
       genre: 'Genre',
       year: 'Year',
@@ -464,6 +481,25 @@ window.__ModuleLoader__.load({
 
     function isHls(url) {
       return /\.m3u8(\?|#|$)/i.test(url);
+    }
+
+    function isFlv(url) {
+      return /\.flv(\?|#|$)/i.test(url);
+    }
+
+    let flvLoader = null;
+    function ensureFlv() {
+      if (window.flvjs) return Promise.resolve(window.flvjs);
+      if (!flvLoader) {
+        flvLoader = new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = '/dsh-cinema/vendor/flv.min.js';
+          script.onload = () => (window.flvjs ? resolve(window.flvjs) : reject(new Error('flv.js not registered')));
+          script.onerror = () => reject(new Error('flv.js failed to load'));
+          document.head.appendChild(script);
+        });
+      }
+      return flvLoader;
     }
 
     function normalizeTitle(text) {
@@ -861,6 +897,40 @@ window.__ModuleLoader__.load({
         if (!video) return undefined;
         let cancelled = false;
         let hlsInstance = null;
+        let flvPlayer = null;
+
+        if (isFlv(src)) {
+          ensureFlv()
+            .then((flvjs) => {
+              if (cancelled) return;
+              if (!flvjs.isSupported()) {
+                setError('FLV not supported');
+                return;
+              }
+              flvPlayer = flvjs.createPlayer(
+                { type: 'flv', url: mediaUrl(src), isLive: false },
+                { enableStashBuffer: false },
+              );
+              flvPlayer.attachMediaElement(video);
+              flvPlayer.load();
+              flvPlayer.play();
+            })
+            .catch(() => setError(t('needHls')));
+          return () => {
+            cancelled = true;
+            if (flvPlayer) {
+              try {
+                flvPlayer.unload();
+                flvPlayer.detachMediaElement();
+                flvPlayer.destroy();
+              } catch {
+                /* ignore */
+              }
+            }
+            video.removeAttribute('src');
+            video.load();
+          };
+        }
 
         if (!isHls(src)) {
           video.src = mediaUrl(src);
@@ -955,7 +1025,7 @@ window.__ModuleLoader__.load({
     function createPanel(ctx, t) {
       return function CinemaPanel() {
         const [key, setKey] = React.useState(getKey);
-        const [tab, setTab] = React.useState('sources');
+        const [tab, setTab] = React.useState('movie');
         const [query, setQuery] = React.useState('');
         const [items, setItems] = React.useState([]);
         const [loading, setLoading] = React.useState(false);
@@ -992,6 +1062,7 @@ window.__ModuleLoader__.load({
             return [];
           }
         });
+        const [sceneLabel, setSceneLabel] = React.useState(null);
         const [progress, setProgress] = React.useState(loadProgress);
         const [favorites, setFavorites] = React.useState(loadFavorites);
         const [favoritesOpen, setFavoritesOpen] = React.useState(false);
@@ -1101,6 +1172,7 @@ window.__ModuleLoader__.load({
             .then((json) => {
               if (cancelled || requestId.current !== id) return;
               setItems(normalize(json?.results, tab));
+              setSceneLabel(null);
             })
             .catch((err) => {
               if (cancelled || requestId.current !== id) return;
@@ -1163,10 +1235,29 @@ window.__ModuleLoader__.load({
           requestId.current = id;
           setLoading(true);
           setError(null);
+          const scene = SCENE_RULES.find((rule) => rule.words.some((word) => term.includes(word)));
+          setSceneLabel(scene ? scene.label : null);
           tmdbGet(`/search/multi?language=zh-CN&include_adult=false&query=${encodeURIComponent(term)}`, key)
             .then((json) => {
-              if (requestId.current !== id) return;
-              setItems(normalize(json?.results, 'movie'));
+              if (requestId.current !== id) return null;
+              const base = normalize(json?.results, 'movie');
+              setItems(base);
+              if (!scene) return null;
+              return tmdbGet(
+                `/discover/movie?language=zh-CN&sort_by=popularity.desc&page=1&with_genres=${scene.genres.join('|')}`,
+                key,
+              )
+                .then((extra) => {
+                  if (requestId.current !== id) return null;
+                  const seen = new Set(base.map((x) => `${x.mediaType}-${x.id}`));
+                  const merged = [
+                    ...base,
+                    ...normalize(extra?.results, 'movie').filter((x) => !seen.has(`${x.mediaType}-${x.id}`)),
+                  ];
+                  setItems(merged);
+                  return null;
+                })
+                .catch(() => null);
             })
             .catch((err) => {
               if (requestId.current !== id) return;
@@ -1534,6 +1625,7 @@ window.__ModuleLoader__.load({
                     searchTmdb(term);
                   })
                 : null,
+              sceneLabel ? h('div', { style: styles.status }, t('sceneHint').replace('{label}', sceneLabel)) : null,
               keyEditorOpen
                 ? h(
                     'div',

@@ -21,6 +21,7 @@ export const inject = ['webServer'];
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const HLS_FILE = join(ROOT, 'vendor', 'hls.min.js');
+const FLV_FILE = join(ROOT, 'vendor', 'flv.min.js');
 const PROXY_URL =
   process.env.DSH_CINEMA_PROXY || process.env.HTTPS_PROXY || process.env.https_proxy || 'http://127.0.0.1:7897';
 
@@ -406,6 +407,18 @@ function serveHlsLib(req, res) {
   }
 }
 
+function serveFlvLib(req, res) {
+  try {
+    const body = readFileSync(FLV_FILE);
+    res.statusCode = 200;
+    res.setHeader('content-type', 'text/javascript; charset=utf-8');
+    res.setHeader('cache-control', 'public, max-age=86400');
+    res.end(body);
+  } catch {
+    sendText(res, 404, 'flv.js not bundled');
+  }
+}
+
 /* ---------------------------------------------------------------- routes */
 
 export function apply(ctx) {
@@ -417,6 +430,7 @@ export function apply(ctx) {
     { kind: 'prefix', path: '/dsh-cinema/media', handler: mediaHandler },
     { kind: 'prefix', path: '/dsh-cinema/hls', handler: hlsHandler },
     { kind: 'exact', path: '/dsh-cinema/vendor/hls.min.js', handler: serveHlsLib },
+    { kind: 'exact', path: '/dsh-cinema/vendor/flv.min.js', handler: serveFlvLib },
   ];
   for (const route of routes) {
     ctx.effect(() => ctx.webServer.register(route), `cinema route ${route.path}`);
