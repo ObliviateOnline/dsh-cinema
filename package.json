@@ -1,6 +1,6 @@
 {
   "name": "dsh-cinema",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "DSH cinema plugin: left-sidebar TMDB poster wall plus CMS source management and in-panel playback",
   "license": "MIT",
   "author": "ObliviateOnline",
