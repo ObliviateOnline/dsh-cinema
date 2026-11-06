@@ -1,0 +1,3 @@
+- insert:
+    - id: cinema
+      name: '@local/dsh-cinema'

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Cinema studio",
+    "description": "Adds a cinema entry to the left sidebar that opens a TMDB-powered poster wall with trending movies, shows and title search."
+  }
+}

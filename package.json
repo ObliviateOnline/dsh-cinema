@@ -1,0 +1,29 @@
+{
+  "name": "@local/dsh-cinema",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "左侧栏「影音工作室」：TMDB 热门电影/剧集海报墙与搜索，宿主同源代理出网。",
+  "license": "MIT",
+  "author": "ObliviateOnline",
+  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "tmdb", "movies"],
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": ["index.js", "client.js", "cordis.patch.yml", "locale/*.json", "icon.svg", "README.md"],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
+    }
+  }
+}
