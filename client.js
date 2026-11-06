@@ -1,8 +1,12 @@
 /**
- * 浏览器半边：「影音工作室」——左侧栏入口 + 整页海报墙面板。
+ * 浏览器半边：「影音工作室」——左侧栏入口 + 整页面板。
  *
- * 数据走同源代理 /dsh-cinema/tmdb/... 与 /dsh-cinema/img/...（Host 半边负责出网），
- * 密钥只存在本浏览器的 localStorage，并通过请求头传给宿主，不进 URL。
+ * 两个数据面：
+ *   1. TMDB 元数据：热门电影/剧集、搜索、详情（经 /dsh-cinema/tmdb 代理）
+ *   2. 片源（CMS V10 采集接口）：自己管理源、搜索、选集、面板内播放
+ *      m3u8 由内置 hls.js 播放，分片经 /dsh-cinema/hls 代理；mp4 走 /dsh-cinema/media。
+ *
+ * 插件不内置任何片源，源由用户自己添加或粘贴导入。
  */
 window.__ModuleLoader__.load({
   id: '@local/dsh-cinema',
@@ -14,49 +18,69 @@ window.__ModuleLoader__.load({
     const PANEL_ID = 'cinema';
     const KEY_STORAGE = 'dsh-cinema:key';
     const HISTORY_STORAGE = 'dsh-cinema:history';
+    const SOURCES_STORAGE = 'dsh-cinema:sources';
     const HISTORY_MAX = 24;
     const TMDB_SIGNUP = 'https://www.themoviedb.org/settings/api';
 
     const zh = {
       title: '影音工作室',
-      subtitle: '热门电影、剧集与搜索，元数据来自 TMDB',
-      movies: '电影',
-      series: '剧集',
+      subtitle: '热门电影、剧集，以及你自己的片源',
+      tabMovies: '电影',
+      tabTv: '剧集',
+      tabSources: '片源',
       searchPlaceholder: '搜索片名 / 剧名，回车确认',
       search: '搜索',
       refresh: '刷新',
       key: '密钥',
       back: '返回对话',
       setupTitle: '先填一个 TMDB 密钥',
-      setupBody: '面板会通过宿主的同源代理访问 TMDB，密钥只保存在这台浏览器里。v3 API Key 和 v4 Read Access Token 都支持。',
+      setupBody: '面板通过宿主的同源代理访问 TMDB，密钥只保存在这台浏览器里。v3 API Key 和 v4 Read Access Token 都支持。',
       setupLink: '去 themoviedb.org 申请',
       keyPlaceholder: '粘贴 API Key 或 Read Access Token',
       save: '保存',
       clear: '清除',
-      cancel: '取消',
       loading: '正在加载…',
       empty: '没有结果',
-      retry: '重试',
       recent: '最近看过',
       noPoster: '暂无海报',
-      rating: '评分',
-      year: '年份',
-      overview: '简介',
-      genres: '类型',
-      runtime: '片长',
-      minutes: '分钟',
       openTmdb: '在 TMDB 打开',
       close: '关闭',
       proxyError: '连接 TMDB 失败',
-      proxyHint: '宿主代理没通：确认 Clash / 代理在运行（默认 127.0.0.1:7897），或用环境变量 DSH_CINEMA_PROXY 指定。',
+      proxyHint: '确认 Clash / 代理在运行（默认 127.0.0.1:7897），或用环境变量 DSH_CINEMA_PROXY 指定。',
       noKey: '还没有配置密钥',
+      manageSources: '管理源',
+      addSource: '添加',
+      sourceName: '名称（可留空）',
+      sourceApi: '接口地址，如 http://xxx.com/api.php/provide/vod',
+      noSources: '还没有片源接口',
+      noSourcesBody: '填一个 CMS V10 采集接口地址，或把片源 JSON（{"sources":[{"name":"","url":""}]}）粘进下面导入。插件本身不带任何源。',
+      importSources: '粘贴片源 JSON 导入',
+      importBtn: '导入',
+      sourceError: '片源接口返回失败',
+      sourceLoading: '正在取列表…',
+      sourceSearchPlaceholder: '在片源里搜片名',
+      prevPage: '上一页',
+      nextPage: '下一页',
+      episodes: '选集',
+      line: '线路',
+      playNow: '播放',
+      playing: '播放中',
+      closePlayer: '关闭播放器',
+      needHls: 'HLS 播放器没加载成功，只能播 mp4 直链。',
+      playerError: '播放失败',
+      remove: '删除',
+      sourceCount: '{count} 个源',
+      results: '共 {count} 条',
+      latest: '最新',
+      searchIn: '搜索',
     };
 
     const en = {
       title: 'Cinema studio',
-      subtitle: 'Trending movies, shows and search, powered by TMDB',
-      movies: 'Movies',
-      series: 'Shows',
+      subtitle: 'Trending titles and your own sources',
+      tabMovies: 'Movies',
+      tabTv: 'Shows',
+      tabSources: 'Sources',
       searchPlaceholder: 'Search a title, press Enter',
       search: 'Search',
       refresh: 'Refresh',
@@ -68,23 +92,40 @@ window.__ModuleLoader__.load({
       keyPlaceholder: 'Paste an API key or read access token',
       save: 'Save',
       clear: 'Clear',
-      cancel: 'Cancel',
       loading: 'Loading…',
       empty: 'Nothing found',
-      retry: 'Retry',
       recent: 'Recently opened',
       noPoster: 'No poster',
-      rating: 'Rating',
-      year: 'Year',
-      overview: 'Overview',
-      genres: 'Genres',
-      runtime: 'Runtime',
-      minutes: 'min',
       openTmdb: 'Open on TMDB',
       close: 'Close',
       proxyError: 'Could not reach TMDB',
-      proxyHint: 'The Host proxy is down: check that your proxy (127.0.0.1:7897 by default) is running, or set DSH_CINEMA_PROXY.',
+      proxyHint: 'Check that your proxy (127.0.0.1:7897 by default) is running, or set DSH_CINEMA_PROXY.',
       noKey: 'No key configured yet',
+      manageSources: 'Manage sources',
+      addSource: 'Add',
+      sourceName: 'Name (optional)',
+      sourceApi: 'API URL, e.g. http://xxx.com/api.php/provide/vod',
+      noSources: 'No source configured',
+      noSourcesBody: 'Add a CMS V10 API endpoint, or paste a sources JSON ({"sources":[{"name":"","url":""}]}) below. No sources ship with this plugin.',
+      importSources: 'Paste sources JSON to import',
+      importBtn: 'Import',
+      sourceError: 'The source returned an error',
+      sourceLoading: 'Loading list…',
+      sourceSearchPlaceholder: 'Search inside sources',
+      prevPage: 'Prev',
+      nextPage: 'Next',
+      episodes: 'Episodes',
+      line: 'Line',
+      playNow: 'Play',
+      playing: 'Playing',
+      closePlayer: 'Close player',
+      needHls: 'The HLS player did not load; only direct mp4 links can play.',
+      playerError: 'Playback failed',
+      remove: 'Remove',
+      sourceCount: '{count} sources',
+      results: '{count} results',
+      latest: 'Latest',
+      searchIn: 'Search',
     };
 
     function readStorage(name) {
@@ -100,7 +141,7 @@ window.__ModuleLoader__.load({
         if (value === null) window.localStorage.removeItem(name);
         else window.localStorage.setItem(name, value);
       } catch {
-        /* 隐私模式下忽略 */
+        /* ignore */
       }
     }
 
@@ -113,6 +154,22 @@ window.__ModuleLoader__.load({
       try {
         const parsed = JSON.parse(readStorage(HISTORY_STORAGE) ?? '[]');
         return Array.isArray(parsed) ? parsed.filter((x) => x && typeof x.id === 'number') : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function loadSources() {
+      try {
+        const parsed = JSON.parse(readStorage(SOURCES_STORAGE) ?? '[]');
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+          .filter((s) => s && typeof s.url === 'string' && /^https?:\/\//i.test(s.url))
+          .map((s, i) => ({
+            id: String(s.id ?? `s${i}-${s.url}`),
+            name: String(s.name ?? s.url).trim() || s.url,
+            url: s.url,
+          }));
       } catch {
         return [];
       }
@@ -137,9 +194,20 @@ window.__ModuleLoader__.load({
       return `/dsh-cinema/img?size=${encodeURIComponent(size)}&file=${encodeURIComponent(file)}`;
     }
 
+    function picUrl(raw) {
+      return `/dsh-cinema/pic?u=${encodeURIComponent(raw)}`;
+    }
+
+    function mediaUrl(raw) {
+      return `/dsh-cinema/media?u=${encodeURIComponent(raw)}`;
+    }
+
+    function hlsUrl(raw) {
+      return `/dsh-cinema/hls?u=${encodeURIComponent(raw)}`;
+    }
+
     function tmdbHeaders(key) {
-      if (key.startsWith('eyJ')) return { 'x-tmdb-token': key };
-      return { 'x-tmdb-key': key };
+      return key.startsWith('eyJ') ? { 'x-tmdb-token': key } : { 'x-tmdb-key': key };
     }
 
     async function tmdbGet(path, key) {
@@ -153,8 +221,7 @@ window.__ModuleLoader__.load({
       }
       if (!res.ok) {
         const message = json?.error ?? json?.status_message ?? `HTTP ${res.status}`;
-        const detail = json?.detail ? ` (${json.detail})` : '';
-        throw new Error(`${message}${detail}`);
+        throw new Error(json?.detail ? `${message} (${json.detail})` : message);
       }
       return json;
     }
@@ -171,6 +238,89 @@ window.__ModuleLoader__.load({
           poster: x.poster_path ?? null,
           overview: x.overview ?? '',
         }));
+    }
+
+    /* ------------------------------------------------------------ CMS */
+
+    function cmsEndpoint(base, params) {
+      let url;
+      try {
+        url = new URL(base);
+      } catch {
+        throw new Error('接口地址不是合法 URL');
+      }
+      for (const [name, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null && value !== '') url.searchParams.set(name, value);
+      }
+      return url.toString();
+    }
+
+    async function cmsGet(base, params) {
+      const target = cmsEndpoint(base, params);
+      const res = await fetch(`/dsh-cinema/cms?u=${encodeURIComponent(target)}`);
+      const text = await res.text();
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new Error(`接口返回的不是 JSON（HTTP ${res.status}）`);
+      }
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+      if (json && json.code !== undefined && Number(json.code) === 0) throw new Error(json.msg ?? '接口返回失败');
+      return json;
+    }
+
+    function normalizeCms(json) {
+      const list = Array.isArray(json?.list) ? json.list : [];
+      return list
+        .map((x) => ({
+          id: String(x.vod_id ?? ''),
+          title: x.vod_name ?? '',
+          pic: x.vod_pic ?? '',
+          year: String(x.vod_year ?? ''),
+          remarks: x.vod_remarks ?? '',
+          raw: x,
+        }))
+        .filter((x) => x.id !== '' && x.title !== '');
+    }
+
+    function parsePlay(vod) {
+      const lines = String(vod?.vod_play_from ?? '').split('$$$');
+      const groups = String(vod?.vod_play_url ?? '').split('$$$');
+      return groups
+        .map((group, index) => ({
+          name: lines[index]?.trim() || `线路${index + 1}`,
+          episodes: group
+            .split('#')
+            .filter(Boolean)
+            .map((part) => {
+              const at = part.indexOf('$');
+              const name = at >= 0 ? part.slice(0, at) : part;
+              const url = at >= 0 ? part.slice(at + 1) : '';
+              return { name: name.trim(), url: url.trim() };
+            })
+            .filter((ep) => /^https?:\/\//i.test(ep.url)),
+        }))
+        .filter((line) => line.episodes.length > 0);
+    }
+
+    function isHls(url) {
+      return /\.m3u8(\?|#|$)/i.test(url);
+    }
+
+    let hlsLoader = null;
+    function ensureHls() {
+      if (window.Hls) return Promise.resolve(window.Hls);
+      if (!hlsLoader) {
+        hlsLoader = new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = '/dsh-cinema/vendor/hls.min.js';
+          script.onload = () => (window.Hls ? resolve(window.Hls) : reject(new Error('hls.js not registered')));
+          script.onerror = () => reject(new Error('hls.js failed to load'));
+          document.head.appendChild(script);
+        });
+      }
+      return hlsLoader;
     }
 
     function CinemaIcon(props) {
@@ -207,7 +357,7 @@ window.__ModuleLoader__.load({
         background: 'var(--dsw-alias-bg-base)',
         color: 'var(--dsw-alias-label-primary)',
         padding: '22px 24px 20px',
-        gap: '14px',
+        gap: '12px',
         overflow: 'hidden',
       },
       header: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', flex: '0 0 auto' },
@@ -239,7 +389,7 @@ window.__ModuleLoader__.load({
         cursor: 'pointer',
       }),
       searchWrap: { display: 'flex', flex: '1 1 240px', gap: '6px', minWidth: '180px' },
-      searchInput: {
+      input: {
         flex: '1 1 auto',
         minWidth: '120px',
         boxSizing: 'border-box',
@@ -334,6 +484,20 @@ window.__ModuleLoader__.load({
         color: '#fff',
         fontVariantNumeric: 'tabular-nums',
       },
+      remarkBadge: {
+        position: 'absolute',
+        left: '6px',
+        top: '6px',
+        maxWidth: 'calc(100% - 12px)',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        padding: '1px 6px',
+        borderRadius: '999px',
+        fontSize: '11px',
+        background: 'rgba(0,0,0,0.62)',
+        color: '#fff',
+      },
       cardTitle: {
         margin: 0,
         fontSize: '12.5px',
@@ -344,16 +508,9 @@ window.__ModuleLoader__.load({
         overflow: 'hidden',
       },
       cardMeta: { margin: 0, fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' },
-      setup: {
-        flex: '1 1 auto',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: 0,
-        overflowY: 'auto',
-      },
+      setup: { flex: '1 1 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0, overflowY: 'auto' },
       setupCard: {
-        width: 'min(460px, 100%)',
+        width: 'min(520px, 100%)',
         border: '1px solid var(--dsw-alias-border-l1)',
         background: 'var(--dsw-alias-bg-layer-1)',
         borderRadius: '12px',
@@ -365,7 +522,34 @@ window.__ModuleLoader__.load({
       setupTitle: { margin: 0, fontSize: '15px', fontWeight: 600 },
       setupBody: { margin: 0, fontSize: '12.5px', lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary)' },
       keyRow: { display: 'flex', gap: '6px', alignItems: 'center' },
+      textarea: {
+        width: '100%',
+        boxSizing: 'border-box',
+        minHeight: '90px',
+        resize: 'vertical',
+        padding: '8px 10px',
+        borderRadius: '8px',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        background: 'var(--dsw-alias-bg-layer-1)',
+        color: 'var(--dsw-alias-label-primary)',
+        font: 'inherit',
+        fontSize: '12.5px',
+        outline: 'none',
+      },
       link: { color: 'var(--dsw-alias-brand-primary)', fontSize: '12px', textDecoration: 'none' },
+      chipsRow: { display: 'flex', gap: '8px', overflowX: 'auto', flex: '0 0 auto', paddingBottom: '2px' },
+      chip: (active) => ({
+        appearance: 'none',
+        border: `1px solid ${active ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)'}`,
+        background: active ? 'var(--dsw-alias-bg-layer-2)' : 'transparent',
+        color: active ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-label-secondary)',
+        borderRadius: '999px',
+        padding: '4px 10px',
+        fontSize: '12px',
+        cursor: 'pointer',
+        flex: '0 0 auto',
+        whiteSpace: 'nowrap',
+      }),
       recentWrap: { flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: '6px' },
       recentLabel: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' },
       recentRow: { display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '2px' },
@@ -379,7 +563,6 @@ window.__ModuleLoader__.load({
         flex: '0 0 auto',
         width: '54px',
       },
-      recentImg: { width: '100%', height: '76px', objectFit: 'cover', borderRadius: '5px', display: 'block' },
       modalBackdrop: {
         position: 'absolute',
         inset: 0,
@@ -391,7 +574,7 @@ window.__ModuleLoader__.load({
         zIndex: 5,
       },
       modal: {
-        width: 'min(760px, 100%)',
+        width: 'min(780px, 100%)',
         maxHeight: '100%',
         overflowY: 'auto',
         background: 'var(--dsw-alias-bg-layer-1)',
@@ -401,27 +584,58 @@ window.__ModuleLoader__.load({
         display: 'flex',
         gap: '16px',
       },
-      modalPoster: { width: '180px', flex: '0 0 auto' },
-      modalBody: { display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0 },
+      modalPoster: { width: '170px', flex: '0 0 auto' },
+      modalBody: { display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0, flex: '1 1 auto' },
       modalTitle: { margin: 0, fontSize: '17px', fontWeight: 600 },
       modalMeta: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', display: 'flex', gap: '10px', flexWrap: 'wrap' },
-      modalOverview: { margin: 0, fontSize: '13px', lineHeight: 1.65, color: 'var(--dsw-alias-label-primary)' },
+      modalOverview: { margin: 0, fontSize: '13px', lineHeight: 1.65 },
+      lineTabs: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' },
+      epGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(74px, 1fr))', gap: '6px', maxHeight: '260px', overflowY: 'auto', paddingRight: '4px' },
+      epBtn: {
+        appearance: 'none',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        background: 'var(--dsw-alias-bg-layer-2)',
+        color: 'var(--dsw-alias-label-primary)',
+        borderRadius: '6px',
+        padding: '6px 4px',
+        fontSize: '12px',
+        cursor: 'pointer',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+      playerBackdrop: {
+        position: 'absolute',
+        inset: 0,
+        background: 'rgba(0,0,0,0.82)',
+        display: 'flex',
+        flexDirection: 'column',
+        zIndex: 9,
+      },
+      playerBar: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '10px',
+        padding: '10px 14px',
+        color: '#fff',
+        fontSize: '13px',
+      },
+      playerStage: { flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 14px 14px' },
+      video: { width: '100%', maxHeight: '100%', background: '#000', borderRadius: '8px' },
+      playerError: { color: '#fff', fontSize: '12.5px', padding: '10px 14px' },
     };
 
-    function Poster({ path, size, alt, fallbackText, style }) {
+    function Poster({ src, alt, fallbackText, style }) {
       const [broken, setBroken] = React.useState(false);
       React.useEffect(() => {
         setBroken(false);
-      }, [path]);
-      if (!path || broken) {
-        return h(
-          'div',
-          { style: style ? { ...styles.posterFallback, ...style } : styles.posterFallback },
-          fallbackText,
-        );
+      }, [src]);
+      if (!src || broken) {
+        return h('div', { style: style ? { ...styles.posterFallback, ...style } : styles.posterFallback }, fallbackText);
       }
       return h('img', {
-        src: posterUrl(path, size),
+        src,
         alt,
         loading: 'lazy',
         style: style ? { ...styles.posterImg, ...style } : styles.posterImg,
@@ -429,10 +643,80 @@ window.__ModuleLoader__.load({
       });
     }
 
+    function Player({ src, title, onClose, t }) {
+      const videoRef = React.useRef(null);
+      const [error, setError] = React.useState(null);
+
+      React.useEffect(() => {
+        const video = videoRef.current;
+        if (!video) return undefined;
+        let cancelled = false;
+        let hlsInstance = null;
+
+        if (!isHls(src)) {
+          video.src = mediaUrl(src);
+          return () => {
+            video.removeAttribute('src');
+            video.load();
+          };
+        }
+
+        ensureHls()
+          .then((Hls) => {
+            if (cancelled) return;
+            if (Hls.isSupported()) {
+              hlsInstance = new Hls({ maxBufferLength: 30, enableWorker: true });
+              hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
+                if (data && data.fatal) setError(data.details || 'HLS error');
+              });
+              hlsInstance.loadSource(hlsUrl(src));
+              hlsInstance.attachMedia(video);
+            } else {
+              video.src = hlsUrl(src);
+            }
+          })
+          .catch(() => setError(t('needHls')));
+
+        return () => {
+          cancelled = true;
+          if (hlsInstance) hlsInstance.destroy();
+          video.removeAttribute('src');
+          video.load();
+        };
+      }, [src]);
+
+      return h(
+        'div',
+        { style: styles.playerBackdrop },
+        h(
+          'div',
+          { style: styles.playerBar },
+          h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, title),
+          h(
+            'button',
+            { type: 'button', style: styles.ghostBtn, onClick: onClose },
+            t('closePlayer'),
+          ),
+        ),
+        h(
+          'div',
+          { style: styles.playerStage },
+          h('video', {
+            ref: videoRef,
+            controls: true,
+            autoPlay: true,
+            playsInline: true,
+            style: styles.video,
+          }),
+        ),
+        error ? h('div', { style: styles.playerError }, `${t('playerError')}: ${error}`) : null,
+      );
+    }
+
     function createPanel(ctx, t) {
       return function CinemaPanel() {
         const [key, setKey] = React.useState(getKey);
-        const [tab, setTab] = React.useState('movie');
+        const [tab, setTab] = React.useState('sources');
         const [query, setQuery] = React.useState('');
         const [items, setItems] = React.useState([]);
         const [loading, setLoading] = React.useState(false);
@@ -444,8 +728,61 @@ window.__ModuleLoader__.load({
         const [keyEditorOpen, setKeyEditorOpen] = React.useState(false);
         const requestId = React.useRef(0);
 
+        const [sources, setSources] = React.useState(loadSources);
+        const [activeSourceId, setActiveSourceId] = React.useState(() => loadSources()[0]?.id ?? null);
+        const [sourceManagerOpen, setSourceManagerOpen] = React.useState(false);
+        const [sourceName, setSourceName] = React.useState('');
+        const [sourceUrl, setSourceUrl] = React.useState('');
+        const [importText, setImportText] = React.useState('');
+        const [cmsItems, setCmsItems] = React.useState([]);
+        const [cmsLoading, setCmsLoading] = React.useState(false);
+        const [cmsError, setCmsError] = React.useState(null);
+        const [cmsQuery, setCmsQuery] = React.useState('');
+        const [cmsPage, setCmsPage] = React.useState(1);
+        const [cmsSearching, setCmsSearching] = React.useState(false);
+        const [selectedVod, setSelectedVod] = React.useState(null);
+        const [activeLine, setActiveLine] = React.useState(0);
+        const [playing, setPlaying] = React.useState(null);
+
+        const activeSource = sources.find((s) => s.id === activeSourceId) ?? null;
+
         React.useEffect(() => {
-          if (!key) return undefined;
+          writeStorage(SOURCES_STORAGE, JSON.stringify(sources));
+        }, [sources]);
+
+        React.useEffect(() => {
+          if (sources.length === 0) {
+            if (activeSourceId !== null) setActiveSourceId(null);
+            return;
+          }
+          if (!sources.some((s) => s.id === activeSourceId)) setActiveSourceId(sources[0].id);
+        }, [sources, activeSourceId]);
+
+        React.useEffect(() => {
+          if (tab !== 'sources' || !activeSource) return undefined;
+          let cancelled = false;
+          setCmsLoading(true);
+          setCmsError(null);
+          cmsGet(activeSource.url, { ac: 'detail', pg: String(cmsPage) })
+            .then((json) => {
+              if (cancelled) return;
+              setCmsItems(normalizeCms(json));
+            })
+            .catch((err) => {
+              if (cancelled) return;
+              setCmsItems([]);
+              setCmsError(err.message);
+            })
+            .finally(() => {
+              if (!cancelled) setCmsLoading(false);
+            });
+          return () => {
+            cancelled = true;
+          };
+        }, [tab, activeSourceId, cmsPage]);
+
+        React.useEffect(() => {
+          if (!key || tab === 'sources') return undefined;
           const id = requestId.current + 1;
           requestId.current = id;
           let cancelled = false;
@@ -470,13 +807,16 @@ window.__ModuleLoader__.load({
         }, [key, tab, nonce]);
 
         React.useEffect(() => {
-          if (!detail) return undefined;
+          if (!detail && !selectedVod && !playing) return undefined;
           const onKeyDown = (event) => {
-            if (event.key === 'Escape') setDetail(null);
+            if (event.key !== 'Escape') return;
+            if (playing) setPlaying(null);
+            else if (selectedVod) setSelectedVod(null);
+            else setDetail(null);
           };
           window.addEventListener('keydown', onKeyDown);
           return () => window.removeEventListener('keydown', onKeyDown);
-        }, [detail]);
+        }, [detail, selectedVod, playing]);
 
         const saveKey = () => {
           const value = keyDraft.trim();
@@ -511,9 +851,7 @@ window.__ModuleLoader__.load({
           tmdbGet(`/search/multi?language=zh-CN&include_adult=false&query=${encodeURIComponent(term)}`, key)
             .then((json) => {
               if (requestId.current !== id) return;
-              const list = normalize(json?.results, 'movie');
-              setItems(list);
-              if (list.length === 0) setError(null);
+              setItems(normalize(json?.results, 'movie'));
             })
             .catch((err) => {
               if (requestId.current !== id) return;
@@ -536,44 +874,121 @@ window.__ModuleLoader__.load({
             .catch((err) => setDetail({ item, loading: false, data: null, error: err.message }));
         };
 
+        /* ------------------------------------------------------ sources */
+
+        const addSource = () => {
+          const url = sourceUrl.trim();
+          if (!/^https?:\/\//i.test(url)) {
+            setCmsError('接口地址必须以 http:// 或 https:// 开头');
+            return;
+          }
+          const name = sourceName.trim() || (() => {
+            try {
+              return new URL(url).host;
+            } catch {
+              return url;
+            }
+          })();
+          const id = `${name}-${Date.now()}`;
+          setSources((prev) => [...prev, { id, name, url }]);
+          setActiveSourceId(id);
+          setSourceName('');
+          setSourceUrl('');
+          setSourceManagerOpen(false);
+        };
+
+        const removeSource = (id) => {
+          setSources((prev) => prev.filter((s) => s.id !== id));
+        };
+
+        const importSources = () => {
+          try {
+            const parsed = JSON.parse(importText);
+            const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.sources) ? parsed.sources : [];
+            const incoming = list
+              .filter((x) => x && typeof x.url === 'string' && /^https?:\/\//i.test(x.url))
+              .map((x, index) => ({
+                id: `imp-${Date.now()}-${index}`,
+                name: String(x.name ?? x.url).trim() || x.url,
+                url: x.url,
+              }));
+            if (incoming.length === 0) {
+              setCmsError('JSON 里没有可用的 url');
+              return;
+            }
+            setSources((prev) => {
+              const seen = new Set(prev.map((s) => s.url));
+              return [...prev, ...incoming.filter((x) => !seen.has(x.url))];
+            });
+            setImportText('');
+            setCmsError(null);
+          } catch {
+            setCmsError('JSON 解析失败，检查一下格式');
+          }
+        };
+
+        const runCmsSearch = (event) => {
+          event.preventDefault();
+          if (!activeSource) return;
+          const term = cmsQuery.trim();
+          if (term === '') {
+            setCmsSearching(false);
+            setCmsPage((p) => (p === 1 ? 1 : 1));
+            return;
+          }
+          setCmsSearching(true);
+          setCmsLoading(true);
+          setCmsError(null);
+          cmsGet(activeSource.url, { ac: 'detail', wd: term, pg: '1' })
+            .then((json) => setCmsItems(normalizeCms(json)))
+            .catch((err) => {
+              setCmsItems([]);
+              setCmsError(err.message);
+            })
+            .finally(() => setCmsLoading(false));
+        };
+
+        const openVod = (item) => {
+          const lines = parsePlay(item.raw);
+          setActiveLine(0);
+          setSelectedVod({ item, lines });
+        };
+
+        const playEpisode = (episode) => {
+          if (!selectedVod) return;
+          setPlaying({ url: episode.url, title: `${selectedVod.item.title} · ${episode.name}` });
+          setSelectedVod(null);
+        };
+
         const close = () => {
           try {
             ctx.layout.selectPanel(null);
           } catch {
-            /* 面板已被切走时忽略 */
+            /* ignore */
           }
         };
 
-        const keyButton = h(
-          'button',
-          { type: 'button', style: styles.ghostBtn, onClick: () => setKeyEditorOpen((v) => !v) },
-          key ? t('key') : t('noKey'),
-        );
+        /* ------------------------------------------------------ render */
 
-        const keyEditor = keyEditorOpen
-          ? h(
-              'div',
-              { style: styles.keyRow },
-              h('input', {
-                type: 'password',
-                style: styles.searchInput,
-                value: keyDraft,
-                placeholder: t('keyPlaceholder'),
-                onChange: (e) => setKeyDraft(e.target.value),
-                onKeyDown: (e) => {
-                  if (e.key === 'Enter') saveKey();
+        const tabs = h(
+          'div',
+          { style: styles.toolbar },
+          ['movie', 'tv', 'sources'].map((id) =>
+            h(
+              'button',
+              {
+                key: id,
+                type: 'button',
+                style: styles.tab(tab === id),
+                onClick: () => {
+                  setTab(id);
+                  setQuery('');
                 },
-              }),
-              h(
-                'button',
-                { type: 'button', style: styles.primaryBtn(keyDraft.trim() === ''), onClick: saveKey },
-                t('save'),
-              ),
-              key
-                ? h('button', { type: 'button', style: styles.ghostBtn, onClick: clearKey }, t('clear'))
-                : null,
-            )
-          : null;
+              },
+              id === 'movie' ? t('tabMovies') : id === 'tv' ? t('tabTv') : t('tabSources'),
+            ),
+          ),
+        );
 
         const setupView = h(
           'div',
@@ -583,17 +998,13 @@ window.__ModuleLoader__.load({
             { style: styles.setupCard },
             h('h2', { style: styles.setupTitle }, t('setupTitle')),
             h('p', { style: styles.setupBody }, t('setupBody')),
-            h(
-              'a',
-              { href: TMDB_SIGNUP, target: '_blank', rel: 'noreferrer', style: styles.link },
-              t('setupLink'),
-            ),
+            h('a', { href: TMDB_SIGNUP, target: '_blank', rel: 'noreferrer', style: styles.link }, t('setupLink')),
             h(
               'div',
               { style: styles.keyRow },
               h('input', {
                 type: 'password',
-                style: styles.searchInput,
+                style: styles.input,
                 value: keyDraft,
                 placeholder: t('keyPlaceholder'),
                 onChange: (e) => setKeyDraft(e.target.value),
@@ -602,16 +1013,26 @@ window.__ModuleLoader__.load({
                 },
                 autoFocus: true,
               }),
-              h(
-                'button',
-                { type: 'button', style: styles.primaryBtn(keyDraft.trim() === ''), onClick: saveKey },
-                t('save'),
-              ),
+              h('button', { type: 'button', style: styles.primaryBtn(keyDraft.trim() === ''), onClick: saveKey }, t('save')),
             ),
           ),
         );
 
-        const body = !key
+        const gridCard = (keyId, poster, badge, title, meta, onOpen) =>
+          h(
+            'button',
+            { key: keyId, type: 'button', style: styles.card, onClick: onOpen },
+            h(
+              'div',
+              { style: styles.posterBox },
+              h(Poster, { src: poster, alt: title, fallbackText: t('noPoster') }),
+              badge,
+            ),
+            h('p', { style: styles.cardTitle }, title || '—'),
+            h('p', { style: styles.cardMeta }, meta || '—'),
+          );
+
+        const tmdbBody = !key
           ? setupView
           : h(
               React.Fragment,
@@ -620,47 +1041,33 @@ window.__ModuleLoader__.load({
                 'div',
                 { style: styles.toolbar },
                 h(
-                  'button',
-                  {
-                    type: 'button',
-                    style: styles.tab(tab === 'movie'),
-                    onClick: () => {
-                      setTab('movie');
-                      setQuery('');
-                    },
-                  },
-                  t('movies'),
-                ),
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    style: styles.tab(tab === 'tv'),
-                    onClick: () => {
-                      setTab('tv');
-                      setQuery('');
-                    },
-                  },
-                  t('series'),
-                ),
-                h(
                   'form',
                   { style: styles.searchWrap, onSubmit: runSearch },
                   h('input', {
-                    style: styles.searchInput,
+                    style: styles.input,
                     value: query,
                     placeholder: t('searchPlaceholder'),
                     onChange: (e) => setQuery(e.target.value),
                   }),
                   h('button', { type: 'submit', style: styles.primaryBtn(false) }, t('search')),
                 ),
-                h(
-                  'button',
-                  { type: 'button', style: styles.ghostBtn, onClick: () => setNonce((n) => n + 1) },
-                  t('refresh'),
-                ),
+                h('button', { type: 'button', style: styles.ghostBtn, onClick: () => setNonce((n) => n + 1) }, t('refresh')),
               ),
-              keyEditor,
+              keyEditorOpen
+                ? h(
+                    'div',
+                    { style: styles.keyRow },
+                    h('input', {
+                      type: 'password',
+                      style: styles.input,
+                      value: keyDraft,
+                      placeholder: t('keyPlaceholder'),
+                      onChange: (e) => setKeyDraft(e.target.value),
+                    }),
+                    h('button', { type: 'button', style: styles.primaryBtn(keyDraft.trim() === ''), onClick: saveKey }, t('save')),
+                    h('button', { type: 'button', style: styles.ghostBtn, onClick: clearKey }, t('clear')),
+                  )
+                : null,
               loading ? h('div', { style: styles.status }, t('loading')) : null,
               error
                 ? h(
@@ -676,27 +1083,13 @@ window.__ModuleLoader__.load({
                 'div',
                 { style: styles.grid },
                 items.map((item) =>
-                  h(
-                    'button',
-                    {
-                      key: `${item.mediaType}-${item.id}`,
-                      type: 'button',
-                      style: styles.card,
-                      onClick: () => openDetail(item),
-                    },
-                    h(
-                      'div',
-                      { style: styles.posterBox },
-                      h(Poster, {
-                        path: item.poster,
-                        size: 'w342',
-                        alt: item.title,
-                        fallbackText: t('noPoster'),
-                      }),
-                      item.rating !== null ? h('span', { style: styles.ratingBadge }, `★ ${item.rating.toFixed(1)}`) : null,
-                    ),
-                    h('p', { style: styles.cardTitle }, item.title || '—'),
-                    h('p', { style: styles.cardMeta }, item.year || '—'),
+                  gridCard(
+                    `${item.mediaType}-${item.id}`,
+                    item.poster ? posterUrl(item.poster, 'w342') : null,
+                    item.rating !== null ? h('span', { style: styles.ratingBadge }, `★ ${item.rating.toFixed(1)}`) : null,
+                    item.title,
+                    item.year,
+                    () => openDetail(item),
                   ),
                 ),
               ),
@@ -719,8 +1112,7 @@ window.__ModuleLoader__.load({
                             onClick: () => openDetail(entry),
                           },
                           h(Poster, {
-                            path: entry.poster,
-                            size: 'w154',
+                            src: entry.poster ? posterUrl(entry.poster, 'w154') : null,
                             alt: entry.title,
                             fallbackText: '',
                             style: { width: '100%', height: 'auto', aspectRatio: '2 / 3' },
@@ -732,7 +1124,266 @@ window.__ModuleLoader__.load({
                 : null,
             );
 
-        const modal = detail
+        const sourceManager = h(
+          'div',
+          { style: styles.setupCard },
+          h('h2', { style: styles.setupTitle }, t('manageSources')),
+          h(
+            'div',
+            { style: styles.chipsRow },
+            sources.map((s) =>
+              h(
+                'span',
+                { key: s.id, style: { display: 'inline-flex', alignItems: 'center', gap: '6px' } },
+                h(
+                  'button',
+                  { type: 'button', style: styles.chip(s.id === activeSourceId), onClick: () => setActiveSourceId(s.id) },
+                  s.name,
+                ),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    style: { ...styles.ghostBtn, padding: '2px 6px' },
+                    onClick: () => removeSource(s.id),
+                    title: t('remove'),
+                  },
+                  '×',
+                ),
+              ),
+            ),
+          ),
+          h(
+            'div',
+            { style: styles.keyRow },
+            h('input', {
+              style: { ...styles.input, flex: '0 0 140px' },
+              value: sourceName,
+              placeholder: t('sourceName'),
+              onChange: (e) => setSourceName(e.target.value),
+            }),
+            h('input', {
+              style: styles.input,
+              value: sourceUrl,
+              placeholder: t('sourceApi'),
+              onChange: (e) => setSourceUrl(e.target.value),
+            }),
+            h('button', { type: 'button', style: styles.primaryBtn(sourceUrl.trim() === ''), onClick: addSource }, t('addSource')),
+          ),
+          h('label', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, t('importSources')),
+          h('input', {
+            type: 'file',
+            accept: '.txt,.json,application/json',
+            style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' },
+            onChange: (event) => {
+              const file = event.target.files && event.target.files[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = () => setImportText(String(reader.result ?? ''));
+              reader.readAsText(file);
+              event.target.value = '';
+            },
+          }),
+          h('textarea', {
+            style: styles.textarea,
+            value: importText,
+            placeholder: '{"sources":[{"name":"示例","url":"http://xxx/api.php/provide/vod"}]}',
+            onChange: (e) => setImportText(e.target.value),
+          }),
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px' } },
+            h('button', { type: 'button', style: styles.primaryBtn(importText.trim() === ''), onClick: importSources }, t('importBtn')),
+            h('button', { type: 'button', style: styles.ghostBtn, onClick: () => setSourceManagerOpen(false) }, t('close')),
+          ),
+        );
+
+        const sourcesBody =
+          sources.length === 0
+            ? h('div', { style: styles.setup }, sourceManager)
+            : h(
+                React.Fragment,
+                null,
+                h(
+                  'div',
+                  { style: styles.toolbar },
+                  h(
+                    'div',
+                    { style: styles.chipsRow },
+                    sources.map((s) =>
+                      h(
+                        'button',
+                        {
+                          key: s.id,
+                          type: 'button',
+                          style: styles.chip(s.id === activeSourceId),
+                          onClick: () => {
+                            setActiveSourceId(s.id);
+                            setCmsPage(1);
+                            setCmsSearching(false);
+                            setCmsQuery('');
+                          },
+                        },
+                        s.name,
+                      ),
+                    ),
+                  ),
+                  h('button', { type: 'button', style: styles.ghostBtn, onClick: () => setSourceManagerOpen((v) => !v) }, t('manageSources')),
+                ),
+                sourceManagerOpen ? sourceManager : null,
+                h(
+                  'div',
+                  { style: styles.toolbar },
+                  h(
+                    'form',
+                    { style: styles.searchWrap, onSubmit: runCmsSearch },
+                    h('input', {
+                      style: styles.input,
+                      value: cmsQuery,
+                      placeholder: t('sourceSearchPlaceholder'),
+                      onChange: (e) => setCmsQuery(e.target.value),
+                    }),
+                    h('button', { type: 'submit', style: styles.primaryBtn(false) }, t('search')),
+                  ),
+                  cmsSearching
+                    ? h(
+                        'button',
+                        {
+                          type: 'button',
+                          style: styles.ghostBtn,
+                          onClick: () => {
+                            setCmsSearching(false);
+                            setCmsQuery('');
+                            setCmsPage(1);
+                          },
+                        },
+                        t('latest'),
+                      )
+                    : null,
+                  cmsSearching
+                    ? null
+                    : h(
+                        React.Fragment,
+                        null,
+                        h(
+                          'button',
+                          {
+                            type: 'button',
+                            style: styles.ghostBtn,
+                            disabled: cmsPage <= 1,
+                            onClick: () => setCmsPage((p) => Math.max(1, p - 1)),
+                          },
+                          t('prevPage'),
+                        ),
+                        h('button', { type: 'button', style: styles.ghostBtn, onClick: () => setCmsPage((p) => p + 1) }, t('nextPage')),
+                      ),
+                ),
+                cmsLoading ? h('div', { style: styles.status }, t('sourceLoading')) : null,
+                cmsError
+                  ? h(
+                      'div',
+                      { style: styles.errorBox },
+                      h('strong', null, t('sourceError')),
+                      h('span', null, cmsError),
+                    )
+                  : null,
+                !cmsLoading && !cmsError && cmsItems.length === 0 ? h('div', { style: styles.status }, t('empty')) : null,
+                h(
+                  'div',
+                  { style: styles.grid },
+                  cmsItems.map((item) =>
+                    gridCard(
+                      item.id,
+                      item.pic ? picUrl(item.pic) : null,
+                      item.remarks ? h('span', { style: styles.remarkBadge }, item.remarks) : null,
+                      item.title,
+                      item.year,
+                      () => openVod(item),
+                    ),
+                  ),
+                ),
+              );
+
+        const vodModal = selectedVod
+          ? h(
+              'div',
+              {
+                style: styles.modalBackdrop,
+                onClick: (event) => {
+                  if (event.target === event.currentTarget) setSelectedVod(null);
+                },
+              },
+              h(
+                'div',
+                { style: styles.modal },
+                h(
+                  'div',
+                  { style: styles.modalPoster },
+                  h(
+                    'div',
+                    { style: styles.posterBox },
+                    h(Poster, {
+                      src: selectedVod.item.pic ? picUrl(selectedVod.item.pic) : null,
+                      alt: selectedVod.item.title,
+                      fallbackText: t('noPoster'),
+                    }),
+                  ),
+                ),
+                h(
+                  'div',
+                  { style: styles.modalBody },
+                  h(
+                    'div',
+                    { style: { display: 'flex', justifyContent: 'space-between', gap: '10px' } },
+                    h('h2', { style: styles.modalTitle }, selectedVod.item.title),
+                    h('button', { type: 'button', style: styles.ghostBtn, onClick: () => setSelectedVod(null) }, t('close')),
+                  ),
+                  h(
+                    'div',
+                    { style: styles.modalMeta },
+                    selectedVod.item.year ? h('span', null, selectedVod.item.year) : null,
+                    selectedVod.item.remarks ? h('span', null, selectedVod.item.remarks) : null,
+                  ),
+                  h('p', { style: styles.modalOverview }, String(selectedVod.item.raw?.vod_content ?? '').replace(/<[^>]+>/g, '').slice(0, 400)),
+                  selectedVod.lines.length > 1
+                    ? h(
+                        'div',
+                        { style: styles.lineTabs },
+                        selectedVod.lines.map((line, index) =>
+                          h(
+                            'button',
+                            {
+                              key: `${line.name}-${index}`,
+                              type: 'button',
+                              style: styles.tab(index === activeLine),
+                              onClick: () => setActiveLine(index),
+                            },
+                            `${t('line')} ${index + 1} · ${line.name}`,
+                          ),
+                        ),
+                      )
+                    : null,
+                  h('div', { style: styles.epGrid },
+                    (selectedVod.lines[activeLine]?.episodes ?? []).map((episode, index) =>
+                      h(
+                        'button',
+                        {
+                          key: `${episode.name}-${index}`,
+                          type: 'button',
+                          style: styles.epBtn,
+                          title: episode.url,
+                          onClick: () => playEpisode(episode),
+                        },
+                        episode.name || String(index + 1),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            )
+          : null;
+
+        const tmdbModal = detail
           ? h(
               'div',
               {
@@ -751,8 +1402,11 @@ window.__ModuleLoader__.load({
                     'div',
                     { style: styles.posterBox },
                     h(Poster, {
-                      path: detail.data?.poster_path ?? detail.item?.poster,
-                      size: 'w500',
+                      src: detail.data?.poster_path
+                        ? posterUrl(detail.data.poster_path, 'w500')
+                        : detail.item?.poster
+                          ? posterUrl(detail.item.poster, 'w500')
+                          : null,
                       alt: detail.item?.title ?? '',
                       fallbackText: t('noPoster'),
                     }),
@@ -765,30 +1419,17 @@ window.__ModuleLoader__.load({
                     'div',
                     { style: { display: 'flex', justifyContent: 'space-between', gap: '10px' } },
                     h('h2', { style: styles.modalTitle }, detail.data?.title ?? detail.data?.name ?? detail.item?.title ?? '—'),
-                    h(
-                      'button',
-                      {
-                        type: 'button',
-                        style: styles.ghostBtn,
-                        onClick: () => setDetail(null),
-                      },
-                      t('close'),
-                    ),
+                    h('button', { type: 'button', style: styles.ghostBtn, onClick: () => setDetail(null) }, t('close')),
                   ),
                   h(
                     'div',
                     { style: styles.modalMeta },
-                    detail.item?.year || detail.data?.release_date
-                      ? h('span', null, `${t('year')} ${detail.item?.year || String(detail.data?.release_date ?? '').slice(0, 4)}`)
-                      : null,
+                    detail.item?.year ? h('span', null, detail.item.year) : null,
                     typeof detail.data?.vote_average === 'number'
-                      ? h('span', null, `${t('rating')} ★ ${detail.data.vote_average.toFixed(1)}`)
-                      : null,
-                    typeof detail.data?.runtime === 'number'
-                      ? h('span', null, `${t('runtime')} ${detail.data.runtime} ${t('minutes')}`)
+                      ? h('span', null, `★ ${detail.data.vote_average.toFixed(1)}`)
                       : null,
                     Array.isArray(detail.data?.genres) && detail.data.genres.length > 0
-                      ? h('span', null, `${t('genres')} ${detail.data.genres.map((g) => g.name).join(' / ')}`)
+                      ? h('span', null, detail.data.genres.map((g) => g.name).join(' / '))
                       : null,
                   ),
                   detail.loading
@@ -826,12 +1467,21 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { style: styles.headerActions },
-              key ? keyButton : null,
+              tab === 'sources' ? null : key
+                ? h(
+                    'button',
+                    { type: 'button', style: styles.ghostBtn, onClick: () => setKeyEditorOpen((v) => !v) },
+                    t('key'),
+                  )
+                : null,
               h('button', { type: 'button', style: styles.ghostBtn, onClick: close }, t('back')),
             ),
           ),
-          body,
-          modal,
+          tabs,
+          tab === 'sources' ? sourcesBody : tmdbBody,
+          tmdbModal,
+          vodModal,
+          playing ? h(Player, { src: playing.url, title: playing.title, onClose: () => setPlaying(null), t }) : null,
         );
       };
     }
