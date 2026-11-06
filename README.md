@@ -48,8 +48,23 @@
 
 ## 安装
 
+**从 npm（推荐给使用者）**
+
 ```powershell
-git clone https://github.com/<you>/dsh-cinema.git D:\plugins\dsh-cinema
+# 在 DSH「插件 → 添加插件」里直接填包名：
+dsh-cinema
+```
+
+或在会话里用插件管理器：
+
+```
+plugin_manager  action=install_bundle  target=dsh-cinema
+```
+
+**从源码（开发用，改完即时生效）**
+
+```powershell
+git clone https://github.com/ObliviateOnline/dsh-cinema.git D:\plugins\dsh-cinema
 ```
 
 然后在 DSH 会话里用插件管理器安装（不要手改 profile）：
