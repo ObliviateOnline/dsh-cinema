@@ -66,6 +66,11 @@ window.__ModuleLoader__.load({
       playNow: '播放',
       playing: '播放中',
       closePlayer: '关闭播放器',
+      playWithSources: '用我的片源播放',
+      sourceSearching: '正在你的片源里找…',
+      sourceNoMatch: '你的片源里没找到这部',
+      sourceNone: '还没有片源，先去「片源」里添加或导入',
+      pickSource: '选一个源播放',
       needHls: 'HLS 播放器没加载成功，只能播 mp4 直链。',
       playerError: '播放失败',
       remove: '删除',
@@ -119,6 +124,11 @@ window.__ModuleLoader__.load({
       playNow: 'Play',
       playing: 'Playing',
       closePlayer: 'Close player',
+      playWithSources: 'Play from my sources',
+      sourceSearching: 'Searching your sources…',
+      sourceNoMatch: 'Not found in your sources',
+      sourceNone: 'No sources yet — add or import them in the Sources tab',
+      pickSource: 'Pick a source to play',
       needHls: 'The HLS player did not load; only direct mp4 links can play.',
       playerError: 'Playback failed',
       remove: 'Remove',
@@ -306,6 +316,48 @@ window.__ModuleLoader__.load({
 
     function isHls(url) {
       return /\.m3u8(\?|#|$)/i.test(url);
+    }
+
+    function normalizeTitle(text) {
+      return String(text ?? '')
+        .toLowerCase()
+        .replace(/[\s·:：\-—_.,，。!！?？'"“”‘’()（）\[\]【】《》<>]/g, '');
+    }
+
+    function matchesTitle(a, b) {
+      const x = normalizeTitle(a);
+      const y = normalizeTitle(b);
+      if (x === '' || y === '') return false;
+      return x.includes(y) || y.includes(x);
+    }
+
+    /** 在用户配置的所有片源里按片名搜索，返回聚合结果（带源名）。 */
+    async function searchVodInSources(sources, titles) {
+      const cleanTitles = [...new Set(titles.map((x) => String(x ?? '').trim()).filter(Boolean))];
+      const jobs = sources.map(async (source) => {
+        const found = [];
+        for (const title of cleanTitles) {
+          const controller = new AbortController();
+          const timer = window.setTimeout(() => controller.abort(), 8000);
+          try {
+            const target = cmsEndpoint(source.url, { ac: 'detail', wd: title, pg: '1' });
+            const res = await fetch(`/dsh-cinema/cms?u=${encodeURIComponent(target)}`, { signal: controller.signal });
+            if (!res.ok) continue;
+            const json = await res.json().catch(() => null);
+            for (const item of normalizeCms(json)) {
+              if (matchesTitle(item.title, title)) found.push({ ...item, sourceName: source.name });
+            }
+            if (found.length > 0) break;
+          } catch {
+            /* 单个源失败不影响其它源 */
+          } finally {
+            window.clearTimeout(timer);
+          }
+        }
+        return found;
+      });
+      const settled = await Promise.all(jobs);
+      return settled.flat();
     }
 
     let hlsLoader = null;
@@ -864,14 +916,38 @@ window.__ModuleLoader__.load({
         };
 
         const openDetail = (item) => {
-          setDetail({ item, loading: true, data: null, error: null });
+          setDetail({ item, loading: true, data: null, error: null, sourcesLoading: false, matches: null });
           const nextHistory = remember(history, item);
           setHistory(nextHistory);
           writeStorage(HISTORY_STORAGE, JSON.stringify(nextHistory));
+
+          if (sources.length === 0) {
+            setDetail((prev) => (prev ? { ...prev, matches: [] } : prev));
+          } else {
+            setDetail((prev) => (prev ? { ...prev, sourcesLoading: true } : prev));
+            searchVodInSources(sources, [item.title]).then((matches) => {
+              setDetail((prev) => (prev ? { ...prev, sourcesLoading: false, matches } : prev));
+            });
+          }
+
           if (!key) return;
           tmdbGet(`/${item.mediaType}/${item.id}?language=zh-CN`, key)
-            .then((data) => setDetail({ item, loading: false, data, error: null }))
-            .catch((err) => setDetail({ item, loading: false, data: null, error: err.message }));
+            .then((data) => {
+              setDetail((prev) => (prev ? { ...prev, loading: false, data, error: null } : prev));
+              const localized = data?.title ?? data?.name;
+              if (localized && sources.length > 0 && localized !== item.title) {
+                searchVodInSources(sources, [localized]).then((extra) => {
+                  if (extra.length === 0) return;
+                  setDetail((prev) => {
+                    if (!prev) return prev;
+                    const seen = new Set((prev.matches ?? []).map((m) => `${m.sourceName}|${m.id}`));
+                    const merged = [...(prev.matches ?? []), ...extra.filter((m) => !seen.has(`${m.sourceName}|${m.id}`))];
+                    return { ...prev, matches: merged };
+                  });
+                });
+              }
+            })
+            .catch((err) => setDetail((prev) => (prev ? { ...prev, loading: false, data: null, error: err.message } : prev)));
         };
 
         /* ------------------------------------------------------ sources */
@@ -1437,6 +1513,45 @@ window.__ModuleLoader__.load({
                     : detail.error
                       ? h('p', { style: styles.modalOverview }, detail.error)
                       : h('p', { style: styles.modalOverview }, detail.data?.overview || detail.item?.overview || ''),
+                  h(
+                    'div',
+                    {
+                      style: {
+                        borderTop: '1px solid var(--dsw-alias-border-l1)',
+                        paddingTop: '10px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px',
+                      },
+                    },
+                    h('span', { style: { fontSize: '12px', fontWeight: 600 } }, t('playWithSources')),
+                    detail.sourcesLoading ? h('span', { style: styles.status }, t('sourceSearching')) : null,
+                    !detail.sourcesLoading && (detail.matches?.length ?? 0) === 0
+                      ? h('span', { style: styles.status }, sources.length === 0 ? t('sourceNone') : t('sourceNoMatch'))
+                      : null,
+                    (detail.matches ?? []).slice(0, 10).map((match, index) =>
+                      h(
+                        'button',
+                        {
+                          key: `${match.sourceName}-${match.id}-${index}`,
+                          type: 'button',
+                          style: { ...styles.epBtn, textAlign: 'left', padding: '8px 10px' },
+                          onClick: () => {
+                            setDetail(null);
+                            openVod({
+                              id: match.id,
+                              title: match.title,
+                              pic: match.pic,
+                              year: match.year,
+                              remarks: match.remarks,
+                              raw: match.raw,
+                            });
+                          },
+                        },
+                        `${match.sourceName} · ${match.title}${match.remarks ? ` · ${match.remarks}` : ''}`,
+                      ),
+                    ),
+                  ),
                   h(
                     'a',
                     {
