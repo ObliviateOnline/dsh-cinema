@@ -536,6 +536,17 @@ window.__ModuleLoader__.load({
       return /\.m3u8(\?|#|$)/i.test(url);
     }
 
+    /** 集名兜底：默认用「第 N 集」，只在名字确认安全时才用原样（避免乱码方块）。 */
+    function displayEpisodeName(raw, index, total) {
+      const text = String(raw ?? '').trim();
+      const broken = /[\uFFFD\u0000-\u001F\uE000-\uF8FF]/.test(text) || /锟斤拷|锟拷|烫烫烫|屯屯屯/.test(text);
+      if (total === 1) {
+        return text !== '' && !broken ? text : '正片';
+      }
+      if (text !== '' && !broken && text.length <= 6 && !/^\d{6,}$/.test(text)) return text;
+      return `第 ${index + 1} 集`;
+    }
+
     function isFlv(url) {
       return /\.flv(\?|#|$)/i.test(url);
     }
@@ -873,6 +884,8 @@ window.__ModuleLoader__.load({
       },
       modal: {
         width: 'min(780px, 100%)',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
         maxHeight: '100%',
         overflowY: 'auto',
         background: 'var(--dsw-alias-bg-layer-1)',
@@ -888,7 +901,7 @@ window.__ModuleLoader__.load({
       modalMeta: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', display: 'flex', gap: '10px', flexWrap: 'wrap' },
       modalOverview: { margin: 0, fontSize: '13px', lineHeight: 1.65 },
       lineTabs: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' },
-      epGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(74px, 1fr))', gap: '6px', maxHeight: '260px', overflowY: 'auto', paddingRight: '4px' },
+      epGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))', gap: '6px', maxHeight: '300px', overflowY: 'auto', paddingRight: '4px' },
       epBtn: {
         appearance: 'none',
         border: '1px solid var(--dsw-alias-border-l1)',
@@ -1532,17 +1545,19 @@ window.__ModuleLoader__.load({
           if (!selectedVod) return;
           const line = selectedVod.lines[activeLine];
           const episodes = (line?.episodes ?? []).map((ep) => ({ name: ep.name, url: ep.url }));
+          const epIndex = typeof index === 'number' ? index : episodes.findIndex((ep) => ep.url === episode.url);
+          const epName = displayEpisodeName(episode.name, epIndex, episodes.length);
           setPlaying({
             url: episode.url,
-            title: `${selectedVod.item.title} · ${episode.name}`,
+            title: `${selectedVod.item.title} · ${epName}`,
             position: 0,
             episodes,
-            index: typeof index === 'number' ? index : episodes.findIndex((ep) => ep.url === episode.url),
+            index: epIndex,
             vodTitle: selectedVod.item.title,
             pic: selectedVod.item.pic,
             raw: selectedVod.item.raw,
             lineName: line?.name ?? '',
-            episodeName: episode.name,
+            episodeName: epName,
           });
           setSelectedVod(null);
         };
@@ -2141,8 +2156,12 @@ window.__ModuleLoader__.load({
                         ),
                       )
                     : null,
-                  h('div', { style: styles.epGrid },
-                    (selectedVod.lines[activeLine]?.episodes ?? []).map((episode, index) =>
+                  h(
+                    'span',
+                    { style: styles.status },
+                    `${t('episodes')} · ${(selectedVod.lines[activeLine]?.episodes ?? []).length}`,
+                  ),
+                  h('div', { style: styles.epGrid },                    (selectedVod.lines[activeLine]?.episodes ?? []).map((episode, index) =>
                       h(
                         'button',
                         {
@@ -2152,7 +2171,7 @@ window.__ModuleLoader__.load({
                           title: episode.url,
                           onClick: () => playEpisode(episode, index),
                         },
-                        episode.name || String(index + 1),
+                        displayEpisodeName(episode.name, index, (selectedVod.lines[activeLine]?.episodes ?? []).length),
                       ),
                     ),
                   ),
